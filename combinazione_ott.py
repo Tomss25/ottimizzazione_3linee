@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import warnings
 
-# Tenta di importare matplotlib per lo styling dei dataframe
+# Gestione sicura di Matplotlib per lo styling
 try:
     import matplotlib.pyplot as plt
     HAS_MATPLOTLIB = True
@@ -31,7 +31,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CSS THEME: AI / CYBERPUNK
+# CSS THEME: AI / CYBERPUNK (FIX MENU TENDINA)
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -45,7 +45,7 @@ st.markdown("""
         font-family: 'Inter', sans-serif; 
     }
     
-    /* Forzatura testo bianco */
+    /* Forzatura testo bianco (con eccezioni gestite dopo) */
     p, span, div, label, li {
         color: #FFFFFF !important;
     }
@@ -120,11 +120,35 @@ st.markdown("""
     thead tr th { background-color: #161B22 !important; color: #00FFFF !important; font-family: 'JetBrains Mono', monospace; }
     tbody tr td { color: #FFFFFF !important; font-family: 'Inter', sans-serif; background-color: #0E1117 !important; }
     
-    /* Inputs */
+    /* --- FIX DROPDOWN MENU / SELECTBOX --- */
+    /* Input field background */
     .stSelectbox > div > div, .stMultiSelect > div > div { 
         background-color: #0D1117; 
         color: #FFFFFF !important; 
         border-color: #30363D; 
+    }
+    
+    /* Il contenitore del menu a tendina (Popover) */
+    div[data-baseweb="popover"], div[data-baseweb="menu"] {
+        background-color: #161B22 !important;
+        border: 1px solid #30363D;
+    }
+    
+    /* Le opzioni dentro il menu */
+    div[data-baseweb="popover"] li, div[data-baseweb="menu"] li {
+        background-color: #161B22 !important;
+        color: #FFFFFF !important;
+    }
+    
+    /* Hover e Selezione nel menu */
+    div[data-baseweb="popover"] li:hover, div[data-baseweb="menu"] li:hover,
+    div[data-baseweb="popover"] li[aria-selected="true"], div[data-baseweb="menu"] li[aria-selected="true"] {
+        background-color: #21262D !important;
+        color: #00FFFF !important; /* Testo ciano quando selezioni */
+    }
+    /* SVG Icons nel dropdown (freccette) */
+    [data-baseweb="select"] svg {
+        fill: #FFFFFF !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -186,36 +210,55 @@ def calculate_metrics(weights, mu, cov, returns_history, freq_factor):
 def optimize_basket(mu, cov, optimization_type, min_w, max_w, max_vol=None, min_vol=None, freq_factor=12):
     n = len(mu)
     cons = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-    
-    # 1. Vincolo Max Vol (Soffitto)
-    if max_vol is not None and max_vol < 0.99:
-        cons.append({
-            'type': 'ineq', 
-            'fun': lambda w: max_vol - (np.sqrt(np.dot(w.T, np.dot(cov, w))) * np.sqrt(freq_factor))
-        })
-
-    # 2. Vincolo Min Vol (Pavimento)
-    if min_vol is not None and min_vol > 0.01:
-        # Volatilità Attuale - Min Vol >= 0
-        cons.append({
-            'type': 'ineq',
-            'fun': lambda w: (np.sqrt(np.dot(w.T, np.dot(cov, w))) * np.sqrt(freq_factor)) - min_vol
-        })
-
     bounds = tuple((min_w, max_w) for _ in range(n))
-    init = np.full(n, 1/n)
-    
-    if optimization_type == "min_vol":
-        fun = lambda w: np.dot(w.T, np.dot(cov, w))
-    elif optimization_type == "max_sharpe":
-        fun = lambda w: - ((np.dot(w, mu) * freq_factor) / (np.sqrt(np.dot(w.T, np.dot(cov, w))) * np.sqrt(freq_factor)))
-    else: 
-        fun = lambda w: -np.dot(w, mu) + 0.1 * np.dot(w.T, np.dot(cov, w)) 
+    init = np.full(n, 1/n) # Start Equal Weight
 
+    # Helper per calcoli rapidi
+    def get_vol(w):
+        return np.sqrt(np.dot(w.T, np.dot(cov, w))) * np.sqrt(freq_factor)
+    
+    def get_ret(w):
+        return np.dot(w, mu) * freq_factor
+
+    # --- STEP 1: Calcolo del 'Pavimento' di Rischio (GMV) ---
+    fun_min_vol = lambda w: np.dot(w.T, np.dot(cov, w))
+    res_gmv = minimize(fun_min_vol, init, method='SLSQP', bounds=bounds, constraints=cons)
+    
+    gmv_vol = get_vol(res_gmv.x) if res_gmv.success else 0.0
+
+    # Se il limite MAX richiesto è inferiore al MINIMO possibile, lo ignoriamo per evitare crash
+    if max_vol is not None and max_vol < gmv_vol:
+        max_vol = None 
+
+    # --- STEP 2: Applicazione Vincoli ---
+    if max_vol is not None:
+        # Volatilità < Max Vol => Max Vol - Volatilità > 0
+        cons.append({'type': 'ineq', 'fun': lambda w: max_vol - get_vol(w)})
+        
+    if min_vol is not None:
+        # Volatilità > Min Vol => Volatilità - Min Vol > 0
+        cons.append({'type': 'ineq', 'fun': lambda w: get_vol(w) - min_vol})
+
+    # --- STEP 3: Definizione Funzione Obiettivo ---
+    if optimization_type == "min_vol":
+        fun = fun_min_vol
+    elif optimization_type == "max_sharpe":
+        # Minimizziamo il negativo dello Sharpe
+        fun = lambda w: - ((get_ret(w) - 0.02) / get_vol(w))
+    else: # max_return
+        # Minimizziamo il negativo del ritorno
+        fun = lambda w: -get_ret(w)
+
+    # --- STEP 4: Esecuzione ---
     try:
-        res = minimize(fun, init, method='SLSQP', bounds=bounds, constraints=cons)
-        return res.x
-    except: return init
+        res = minimize(fun, init, method='SLSQP', bounds=bounds, constraints=cons, tol=1e-8, options={'maxiter': 1000})
+        
+        if res.success:
+            return res.x
+        else:
+            return res_gmv.x if res_gmv.success else init
+    except:
+        return init
 
 def run_backtest(returns_log, allocations):
     nav_data = {}
@@ -291,11 +334,10 @@ def calculate_views_hybrid(returns_native_log, ff5_monthly_log, window=60):
     return pd.Series(views_native), None
 
 def style_chart(fig, title):
-    # Palette AI/Neon (Cyan, Purple, Lime, Electric Blue, Hot Pink)
     neon_colors = ['#00FFFF', '#BD00FF', '#00FF9D', '#29B5E8', '#FF0055']
     
     fig.update_layout(
-        template="plotly_dark", # Tema scuro nativo
+        template="plotly_dark", 
         title=dict(
             text=f"<b>{title}</b>", 
             font=dict(size=18, family="JetBrains Mono, monospace", color="#00FFFF"),
@@ -304,7 +346,7 @@ def style_chart(fig, title):
         colorway=neon_colors, 
         margin=dict(l=20, r=20, t=50, b=20),
         hovermode="x unified",
-        paper_bgcolor='rgba(0,0,0,0)', # Trasparente
+        paper_bgcolor='rgba(0,0,0,0)', 
         plot_bgcolor='rgba(0,0,0,0)',
         legend=dict(
             orientation="h", 
@@ -341,7 +383,6 @@ max_w = st.sidebar.slider("Max % per Asset", 0.1, 1.0, 0.35, 0.05)
 
 st.sidebar.markdown("---")
 
-# Lista opzioni volatilità
 vol_options = ["Nessun Limite"] + [f"{i}%" for i in [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 18, 20, 25, 30, 40, 50]]
 
 def parse_vol_choice(choice):
@@ -435,7 +476,6 @@ if uploaded:
         st.markdown("### 🧠 Predictive Performance")
         
         best = res_df.loc["Balanced"]
-        # KPI CARDS
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Exp. Return", f"{best['Rendimento']:.1%}")
         c2.metric("Exp. Volatility", f"{best['Volatilità']:.1%}")
@@ -450,7 +490,6 @@ if uploaded:
             st.warning("⚠️ Install matplotlib for color gradients in tables.")
             st.table(res_df.style.format("{:.1%}", subset=["Rendimento", "Volatilità"]).format("{:.2f}", subset=["Sharpe", "Diversif. Ratio"]))
         
-        # --- TASTO DOWNLOAD TAB 1 ---
         res_export = res_df.copy()
         res_export['Rendimento'] = res_export['Rendimento'].map('{:.1%}'.format)
         res_export['Volatilità'] = res_export['Volatilità'].map('{:.1%}'.format)
@@ -463,7 +502,6 @@ if uploaded:
             file_name='ai_metrics.csv',
             mime='text/csv'
         )
-        # ----------------------------
 
         fig_ef = px.scatter(res_df, x="Volatilità", y="Rendimento", color="Sharpe", 
                           size=[50,50,50], text=res_df.index, color_continuous_scale="Viridis", title="Efficient Frontier")
@@ -477,8 +515,6 @@ if uploaded:
     with tab2:
         st.markdown("### 🧬 Asset DNA (Composition)")
         weights_df = pd.DataFrame(allocations, index=returns.columns)
-        
-        # ORDINAMENTO: I titoli a 0% restano visibili, ma in fondo
         w_clean = weights_df.sort_values(by="Balanced", ascending=False)
         
         if HAS_MATPLOTLIB:
@@ -486,7 +522,6 @@ if uploaded:
         else:
             st.dataframe(w_clean.style.format("{:.1%}"), height=500, use_container_width=True)
         
-        # --- TASTO DOWNLOAD TAB 2 ---
         w_export = w_clean.applymap(lambda x: '{:.1%}'.format(x))
         st.download_button(
             label="📥 DOWNLOAD ALLOCATION (CSV)",
@@ -494,7 +529,6 @@ if uploaded:
             file_name='ai_allocation.csv',
             mime='text/csv'
         )
-        # ----------------------------
 
         df_melt = w_clean.reset_index().melt(id_vars="index", var_name="Strategia", value_name="Peso")
         fig_bar = px.bar(df_melt, x="Strategia", y="Peso", color="index", text_auto=".0%", title="Allocation Breakdown")
@@ -535,14 +569,11 @@ if uploaded:
             fig_dd.update_yaxes(tickformat=".1%", range=[None, 0.005]) 
             st.plotly_chart(fig_dd, use_container_width=True)
 
-    # TAB 4: CORRELAZIONE
+    # TAB 4
     with tab4:
         st.markdown("### 🔗 Network Correlation")
-        
-        # Calcolo Correlazione
         corr_matrix = returns.corr()
         
-        # Heatmap Interattiva
         fig_corr = px.imshow(
             corr_matrix, 
             text_auto=".2f", 
@@ -558,7 +589,6 @@ if uploaded:
         )
         st.plotly_chart(fig_corr, use_container_width=True)
         
-        # Tabella Dati (per copia-incolla)
         with st.expander("📋 View Raw Data"):
             if HAS_MATPLOTLIB:
                 st.dataframe(corr_matrix.style.background_gradient(cmap="RdBu_r", vmin=-1, vmax=1).format("{:.2f}"), height=400, use_container_width=True)
@@ -566,5 +596,4 @@ if uploaded:
                 st.dataframe(corr_matrix.style.format("{:.2f}"), height=400, use_container_width=True)
 
 else:
-    # Empty State AI
     st.info("👋 SYSTEM STANDBY. Initialize by uploading CSV data.")
