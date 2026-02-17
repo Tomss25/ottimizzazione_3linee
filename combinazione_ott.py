@@ -31,7 +31,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CSS THEME: AI / CYBERPUNK (FIX MENU TENDINA)
+# CSS THEME: AI / CYBERPUNK (FIX: DROPDOWN + DOWNLOAD + UPLOADER)
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -80,8 +80,9 @@ st.markdown("""
     [data-testid="stMetricLabel"] { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #CCCCCC !important; }
     [data-testid="stMetricValue"] { font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; color: #00FFFF !important; text-shadow: 0 0 5px rgba(0, 255, 255, 0.5); }
 
-    /* Buttons */
-    .stButton > button { 
+    /* --- BUTTONS & DOWNLOAD BUTTONS --- */
+    /* Targettiamo sia i bottoni normali che quelli di download */
+    .stButton > button, .stDownloadButton > button { 
         background: linear-gradient(90deg, #21262d 0%, #0d1117 100%); 
         color: #00FFFF !important; 
         border: 1px solid #30363D; 
@@ -92,10 +93,34 @@ st.markdown("""
         letter-spacing: 1px;
         transition: all 0.3s ease;
     }
-    .stButton > button:hover { 
+    .stButton > button:hover, .stDownloadButton > button:hover { 
         border-color: #00FFFF; 
         box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
         color: #FFFFFF !important;
+    }
+
+    /* --- FILE UPLOADER STYLE --- */
+    /* Contenitore principale uploader */
+    [data-testid="stFileUploader"] {
+        background-color: #161B22;
+        border-radius: 4px;
+        padding: 10px;
+    }
+    /* La dropzone specifica */
+    [data-testid="stFileUploader"] section {
+        background-color: #161B22 !important;
+        border: 1px dashed #30363D !important;
+    }
+    /* Testi dentro l'uploader (Drag and drop file here...) */
+    [data-testid="stFileUploader"] section > div > div > span, 
+    [data-testid="stFileUploader"] section > div > div > small {
+        color: #E0E0E0 !important;
+    }
+    /* Bottone 'Browse files' dentro l'uploader */
+    [data-testid="stFileUploader"] button {
+         background: linear-gradient(90deg, #21262d 0%, #0d1117 100%);
+         color: #00FFFF !important;
+         border: 1px solid #30363D;
     }
 
     /* Tabs */
@@ -121,7 +146,6 @@ st.markdown("""
     tbody tr td { color: #FFFFFF !important; font-family: 'Inter', sans-serif; background-color: #0E1117 !important; }
     
     /* --- FIX DROPDOWN MENU / SELECTBOX --- */
-    /* Input field background */
     .stSelectbox > div > div, .stMultiSelect > div > div { 
         background-color: #0D1117; 
         color: #FFFFFF !important; 
@@ -144,9 +168,8 @@ st.markdown("""
     div[data-baseweb="popover"] li:hover, div[data-baseweb="menu"] li:hover,
     div[data-baseweb="popover"] li[aria-selected="true"], div[data-baseweb="menu"] li[aria-selected="true"] {
         background-color: #21262D !important;
-        color: #00FFFF !important; /* Testo ciano quando selezioni */
+        color: #00FFFF !important; 
     }
-    /* SVG Icons nel dropdown (freccette) */
     [data-baseweb="select"] svg {
         fill: #FFFFFF !important;
     }
