@@ -6,3 +6,4 @@ statsmodels
 scikit-learn
 scipy
 plotly
+matplotlib
