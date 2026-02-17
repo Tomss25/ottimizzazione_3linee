@@ -11,6 +11,14 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import warnings
+
+# Tenta di importare matplotlib per lo styling dei dataframe
+try:
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+
 warnings.filterwarnings('ignore')
 
 # ---------------------------------------------------------
@@ -23,7 +31,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CSS THEME: AI / CYBERPUNK (CORRETTO PER TESTO BIANCO)
+# CSS THEME: AI / CYBERPUNK
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -33,11 +41,11 @@ st.markdown("""
     /* Global Dark Theme */
     .stApp { 
         background-color: #0E1117; 
-        color: #FFFFFF; /* TESTO BIANCO GLOBALE */
+        color: #FFFFFF;
         font-family: 'Inter', sans-serif; 
     }
     
-    /* Forzatura testo bianco su elementi specifici */
+    /* Forzatura testo bianco */
     p, span, div, label, li {
         color: #FFFFFF !important;
     }
@@ -48,7 +56,7 @@ st.markdown("""
         border-right: 1px solid #30363D; 
     }
     [data-testid="stSidebar"] p, [data-testid="stSidebar"] span, [data-testid="stSidebar"] label {
-        color: #E0E0E0 !important; /* Leggermente grigio nella sidebar per gerarchia */
+        color: #E0E0E0 !important;
     }
     
     /* Typography */
@@ -56,15 +64,15 @@ st.markdown("""
         color: #FFFFFF !important; 
         font-weight: 700; 
         letter-spacing: 0.05em; 
-        text-shadow: 0 0 10px rgba(0, 255, 255, 0.3); /* Neon Glow */
+        text-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
     }
     h1 { font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; }
     
-    /* Metrics Cards (HUD Style) */
+    /* Metrics Cards */
     div[data-testid="metric-container"] { 
         background-color: #1C2128; 
         border: 1px solid #30363D; 
-        border-left: 4px solid #00FFFF; /* Cyan Accent */
+        border-left: 4px solid #00FFFF; 
         border-radius: 4px; 
         padding: 16px; 
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); 
@@ -72,7 +80,7 @@ st.markdown("""
     [data-testid="stMetricLabel"] { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #CCCCCC !important; }
     [data-testid="stMetricValue"] { font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; color: #00FFFF !important; text-shadow: 0 0 5px rgba(0, 255, 255, 0.5); }
 
-    /* Buttons (Cyberpunk Gradient) */
+    /* Buttons */
     .stButton > button { 
         background: linear-gradient(90deg, #21262d 0%, #0d1117 100%); 
         color: #00FFFF !important; 
@@ -118,12 +126,11 @@ st.markdown("""
         color: #FFFFFF !important; 
         border-color: #30363D; 
     }
-    
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# CORE FUNCTIONS (LOG-NORMAL) - LOGICA INVARIATA
+# CORE FUNCTIONS
 # ---------------------------------------------------------
 
 def detect_frequency(df):
@@ -436,8 +443,12 @@ if uploaded:
         c4.metric("Div. Score", f"{best['Diversif. Ratio']:.2f}")
         
         st.markdown("#### Strategy Matrix")
-        # Uso 'viridis' che è sicuramente supportato al posto di magma
-        st.table(res_df.style.format("{:.1%}", subset=["Rendimento", "Volatilità"]).format("{:.2f}", subset=["Sharpe", "Diversif. Ratio"]).background_gradient(cmap="viridis", subset=["Rendimento", "Sharpe"]))
+        
+        if HAS_MATPLOTLIB:
+            st.table(res_df.style.format("{:.1%}", subset=["Rendimento", "Volatilità"]).format("{:.2f}", subset=["Sharpe", "Diversif. Ratio"]).background_gradient(cmap="viridis", subset=["Rendimento", "Sharpe"]))
+        else:
+            st.warning("⚠️ Install matplotlib for color gradients in tables.")
+            st.table(res_df.style.format("{:.1%}", subset=["Rendimento", "Volatilità"]).format("{:.2f}", subset=["Sharpe", "Diversif. Ratio"]))
         
         # --- TASTO DOWNLOAD TAB 1 ---
         res_export = res_df.copy()
@@ -470,8 +481,10 @@ if uploaded:
         # ORDINAMENTO: I titoli a 0% restano visibili, ma in fondo
         w_clean = weights_df.sort_values(by="Balanced", ascending=False)
         
-        # FIX ERRORE: cmap="winter" al posto di "mako" (Blue-Green simile, ma supportato)
-        st.dataframe(w_clean.style.format("{:.1%}").background_gradient(cmap="winter", axis=None), height=500, use_container_width=True)
+        if HAS_MATPLOTLIB:
+            st.dataframe(w_clean.style.format("{:.1%}").background_gradient(cmap="winter", axis=None), height=500, use_container_width=True)
+        else:
+            st.dataframe(w_clean.style.format("{:.1%}"), height=500, use_container_width=True)
         
         # --- TASTO DOWNLOAD TAB 2 ---
         w_export = w_clean.applymap(lambda x: '{:.1%}'.format(x))
@@ -504,7 +517,10 @@ if uploaded:
         c_kpi, c_plot = st.columns([1, 2])
         with c_kpi:
             st.markdown("#### Realized Results")
-            st.table(perf_hist.style.format("{:.2%}").background_gradient(cmap="RdYlGn", subset=["CAGR"]))
+            if HAS_MATPLOTLIB:
+                st.table(perf_hist.style.format("{:.2%}").background_gradient(cmap="RdYlGn", subset=["CAGR"]))
+            else:
+                st.table(perf_hist.style.format("{:.2%}"))
             
         with c_plot:
             fig_nav = px.line(nav_df, title="Capital Growth (Base 100)")
@@ -544,7 +560,10 @@ if uploaded:
         
         # Tabella Dati (per copia-incolla)
         with st.expander("📋 View Raw Data"):
-            st.dataframe(corr_matrix.style.background_gradient(cmap="RdBu_r", vmin=-1, vmax=1).format("{:.2f}"), height=400, use_container_width=True)
+            if HAS_MATPLOTLIB:
+                st.dataframe(corr_matrix.style.background_gradient(cmap="RdBu_r", vmin=-1, vmax=1).format("{:.2f}"), height=400, use_container_width=True)
+            else:
+                st.dataframe(corr_matrix.style.format("{:.2f}"), height=400, use_container_width=True)
 
 else:
     # Empty State AI
