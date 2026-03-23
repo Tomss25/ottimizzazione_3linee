@@ -140,7 +140,6 @@ def process_data_raw(file_bytes, filename):
                         if df[col].str.contains(',').any() and not df[col].str.contains('\.').any():
                              df[col] = df[col].str.replace(',', '.')
                         df[col] = pd.to_numeric(df[col], errors='coerce')
-                # NON facciamo dropna qui per evitare di distruggere dati prematuramente
                 return df, None
         except Exception as e:
             continue
@@ -168,7 +167,6 @@ def get_ff5():
 
 @st.cache_data(show_spinner=False)
 def compute_core_stats(df_subset):
-    """Isola i calcoli pesanti. Riceve solo le colonne scelte."""
     df_clean = df_subset.dropna(how='any')
     if df_clean.empty or len(df_clean) < 3:
         raise ValueError("Dati insufficienti dopo l'allineamento degli asset storici.")
@@ -178,8 +176,7 @@ def compute_core_stats(df_subset):
     
     ff5_log = get_ff5()
     
-    # Calcolo Views
-    rf_annualized = 0.02 # fallback risk free
+    rf_annualized = 0.02 
     try:
         returns_monthly_proxy = returns_log.resample('ME').sum()
         returns_monthly_proxy.index = pd.to_datetime(returns_monthly_proxy.index)
@@ -209,7 +206,6 @@ def compute_core_stats(df_subset):
         else:
             raise ValueError("Allineamento Fama-French fallito per storico troppo breve.")
     except Exception as e:
-        # Fallback intelligente: Shrinkage verso la media globale invece che media pura (riduce l'error maximization)
         raw_means = returns_log.mean()
         global_mean = raw_means.mean()
         mu = (raw_means * 0.5) + (global_mean * 0.5) 
@@ -222,7 +218,6 @@ def calculate_metrics(weights, mu, cov, freq_factor, risk_free_rate):
     ret_log = np.dot(weights, mu) * freq_factor
     var_log = np.dot(weights.T, np.dot(cov, weights))
     vol_log = np.sqrt(var_log) * np.sqrt(freq_factor)
-    # Calcolo Sharpe coerente con il Risk Free calcolato dinamicamente
     sharpe = (ret_log - risk_free_rate) / vol_log if vol_log > 0 else 0
     
     asset_vols = np.sqrt(np.diag(cov)) * np.sqrt(freq_factor)
@@ -243,7 +238,6 @@ def optimize_basket(mu, cov, optimization_type, min_w, max_w, risk_free_rate, ma
     def get_ret(w):
         return np.dot(w, mu) * freq_factor
 
-    # I vincoli vengono forzati rigidamente. Se fallisce, solleva eccezione.
     if max_vol is not None:
         cons.append({'type': 'ineq', 'fun': lambda w, max_v=max_vol: max_v - get_vol(w)})
     if min_vol is not None:
@@ -263,14 +257,11 @@ def optimize_basket(mu, cov, optimization_type, min_w, max_w, risk_free_rate, ma
     return res.x
 
 def run_backtest(returns_log, allocations):
-    # CORREZIONE MATEMATICA: Trasformazione log-rendimenti in rendimenti semplici per aggregazione lineare di portafoglio
     simple_returns = np.exp(returns_log) - 1
     
     nav_data = {}
     for name, weights in allocations.items():
-        # Rendimento portafoglio è media ponderata dei rendimenti semplici
         port_simple_ret = simple_returns.dot(weights)
-        # NAV cumulato moltiplicando 1 + rendimento
         nav = 100 * np.cumprod(1 + port_simple_ret)
         
         try:
@@ -341,7 +332,6 @@ with col_up:
     uploaded = st.file_uploader("📂 INGEST DATA (CSV)", type='csv')
 
 if uploaded:
-    # Parsing sicuro senza distruzione dati
     df_raw, error_msg = process_data_raw(uploaded.getvalue(), uploaded.name)
     
     if df_raw is None:
@@ -354,7 +344,6 @@ if uploaded:
     
     if len(selected_assets) < 2: st.warning("⚠️ CRITICAL: Select at least 2 assets."); st.stop()
 
-    # Elaborazione Core Cacheata
     try:
         returns, freq, mu_views, cov, rf_rate = compute_core_stats(df_raw[selected_assets])
     except ValueError as e:
@@ -378,10 +367,10 @@ if uploaded:
         except ValueError as e:
             st.error(f"❌ FALLIMENTO STRATEGIA '{name}': {str(e)} \nI vincoli di volatilità imposti per questa linea sono matematicamente irrealizzabili. Modifica i parametri nella sidebar e clicca Ribilancia.")
             calc_success = False
-            break # Blocca l'esecuzione se un'ottimizzazione fallisce
+            break
 
     if not calc_success:
-        st.stop() # Ferma il rendering delle tabelle se mancano dati
+        st.stop() 
     
     res_df = pd.DataFrame(metrics, columns=["Linea", "Rendimento", "Volatilità", "Sharpe", "Diversif. Ratio"]).set_index("Linea")
     
@@ -422,7 +411,8 @@ if uploaded:
         w_clean = weights_df.sort_values(by="Balanced", ascending=False)
         
         if HAS_MATPLOTLIB:
-            st.dataframe(w_clean.style.format("{:.1%}").background_gradient(cmap="winter", axis=None), height=500, use_container_width=True)
+            # MODIFICA: Palette 'cividis' applicata qui al posto di 'winter'. Professionale, leggibile e sobria.
+            st.dataframe(w_clean.style.format("{:.1%}").background_gradient(cmap="cividis", axis=None), height=500, use_container_width=True)
         else:
             st.dataframe(w_clean.style.format("{:.1%}"), height=500, use_container_width=True)
         
