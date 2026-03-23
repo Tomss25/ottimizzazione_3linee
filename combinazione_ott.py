@@ -104,8 +104,12 @@ st.markdown("""
     .stTabs [aria-selected="true"] { background-color: #21262D; color: #00FFFF !important; border: 1px solid #30363D; border-bottom: 2px solid #00FFFF; }
     
     [data-testid="stDataFrame"] { border: 1px solid #30363D; }
-    thead tr th { background-color: #161B22 !important; color: #00FFFF !important; font-family: 'JetBrains Mono', monospace; }
-    tbody tr td { color: #FFFFFF !important; font-family: 'Inter', sans-serif; background-color: #0E1117 !important; }
+    
+    /* MODIFICA: Intestazione tabellare evidenziata (Testo più grande, maiuscolo e bordo inferiore marcato) */
+    thead tr th { background-color: #1C2128 !important; color: #00FFFF !important; font-family: 'JetBrains Mono', monospace; font-size: 1.1rem !important; text-transform: uppercase; border-bottom: 2px solid #00FFFF !important; }
+    
+    /* MODIFICA: Rimosso '!important' da background-color per permettere a Pandas di applicare i colori tenui */
+    tbody tr td { color: #FFFFFF !important; font-family: 'Inter', sans-serif; background-color: #0E1117; }
     
     .stSelectbox > div > div, .stMultiSelect > div > div { background-color: #0D1117; color: #FFFFFF !important; border-color: #30363D; }
     div[data-baseweb="popover"], div[data-baseweb="menu"] { background-color: #161B22 !important; border: 1px solid #30363D; }
@@ -410,11 +414,18 @@ if uploaded:
         weights_df = pd.DataFrame(allocations, index=returns.columns)
         w_clean = weights_df.sort_values(by="Balanced", ascending=False)
         
-        if HAS_MATPLOTLIB:
-            # MODIFICA: Palette 'cividis' applicata qui al posto di 'winter'. Professionale, leggibile e sobria.
-            st.dataframe(w_clean.style.format("{:.1%}").background_gradient(cmap="cividis", axis=None), height=500, use_container_width=True)
-        else:
-            st.dataframe(w_clean.style.format("{:.1%}"), height=500, use_container_width=True)
+        # MODIFICA: Funzione per applicare colori tenui e differenziati per ogni singola colonna
+        def highlight_cols(s):
+            if s.name == 'Conservative':
+                return ['background-color: rgba(0, 255, 255, 0.1)'] * len(s) # Ciano tenue
+            elif s.name == 'Balanced':
+                return ['background-color: rgba(189, 0, 255, 0.1)'] * len(s) # Viola tenue
+            elif s.name == 'Aggressive':
+                return ['background-color: rgba(255, 0, 85, 0.1)'] * len(s)  # Rosa tenue
+            return [''] * len(s)
+            
+        styled_w = w_clean.style.format("{:.1%}").apply(highlight_cols, axis=0)
+        st.dataframe(styled_w, height=500, use_container_width=True)
         
         w_export = w_clean.applymap(lambda x: '{:.1%}'.format(x))
         st.download_button(label="📥 DOWNLOAD ALLOCATION (CSV)", data=w_export.to_csv().encode('utf-8'), file_name='ai_allocation.csv', mime='text/csv')
