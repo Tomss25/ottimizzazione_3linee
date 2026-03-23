@@ -40,7 +40,7 @@ st.markdown("""
 
     /* Global Dark Theme */
     .stApp { 
-        background-color: #1A202C; /* MODIFICA: Sfondo leggermente più chiaro (era #0E1117) */
+        background-color: #1A202C; 
         color: #FFFFFF;
         font-family: 'Inter', sans-serif; 
     }
@@ -59,9 +59,9 @@ st.markdown("""
         color: #E0E0E0 !important;
     }
     
-    /* MODIFICA: Forzatura colore bianco per il titolo dell'expander Parametri Volatilità */
+    /* MODIFICA ESATTA: Forzatura colore nero per il titolo dell'expander Parametri Volatilità */
     [data-testid="stExpander"] summary p {
-        color: #FFFFFF !important;
+        color: #000000 !important;
         font-weight: 700 !important;
     }
     
@@ -87,7 +87,6 @@ st.markdown("""
     [data-testid="stMetricValue"] { font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; color: #00FFFF !important; text-shadow: 0 0 5px rgba(0, 255, 255, 0.5); }
 
     /* --- BUTTONS & DOWNLOAD BUTTONS --- */
-    /* Targettiamo bottoni normali, bottoni form e bottoni download */
     .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] > button { 
         background: linear-gradient(90deg, #21262d 0%, #0d1117 100%); 
         color: #00FFFF !important; 
@@ -106,23 +105,19 @@ st.markdown("""
     }
 
     /* --- FILE UPLOADER STYLE --- */
-    /* Contenitore principale uploader */
     [data-testid="stFileUploader"] {
         background-color: #161B22;
         border-radius: 4px;
         padding: 10px;
     }
-    /* La dropzone specifica */
     [data-testid="stFileUploader"] section {
         background-color: #161B22 !important;
         border: 1px dashed #30363D !important;
     }
-    /* Testi dentro l'uploader */
     [data-testid="stFileUploader"] section > div > div > span, 
     [data-testid="stFileUploader"] section > div > div > small {
         color: #E0E0E0 !important;
     }
-    /* Bottone 'Browse files' dentro l'uploader */
     [data-testid="stFileUploader"] button {
          background: linear-gradient(90deg, #21262d 0%, #0d1117 100%);
          color: #00FFFF !important;
@@ -158,19 +153,16 @@ st.markdown("""
         border-color: #30363D; 
     }
     
-    /* Il contenitore del menu a tendina (Popover) */
     div[data-baseweb="popover"], div[data-baseweb="menu"] {
         background-color: #161B22 !important;
         border: 1px solid #30363D;
     }
     
-    /* Le opzioni dentro il menu */
     div[data-baseweb="popover"] li, div[data-baseweb="menu"] li {
         background-color: #161B22 !important;
         color: #FFFFFF !important;
     }
     
-    /* Hover e Selezione nel menu */
     div[data-baseweb="popover"] li:hover, div[data-baseweb="menu"] li:hover,
     div[data-baseweb="popover"] li[aria-selected="true"], div[data-baseweb="menu"] li[aria-selected="true"] {
         background-color: #21262D !important;
@@ -240,54 +232,32 @@ def optimize_basket(mu, cov, optimization_type, min_w, max_w, max_vol=None, min_
     n = len(mu)
     cons = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
     bounds = tuple((min_w, max_w) for _ in range(n))
-    init = np.full(n, 1/n) # Start Equal Weight
+    init = np.full(n, 1/n) 
 
-    # Helper per calcoli rapidi
     def get_vol(w):
         return np.sqrt(np.dot(w.T, np.dot(cov, w))) * np.sqrt(freq_factor)
     
     def get_ret(w):
         return np.dot(w, mu) * freq_factor
 
-    # --- STEP 1: Calcolo del 'Pavimento' di Rischio (GMV) ---
-    fun_min_vol = lambda w: np.dot(w.T, np.dot(cov, w))
-    res_gmv = minimize(fun_min_vol, init, method='SLSQP', bounds=bounds, constraints=cons)
-    
-    gmv_vol = get_vol(res_gmv.x) if res_gmv.success else 0.0
-
-    # Se il limite MAX richiesto è inferiore al MINIMO possibile, lo ignoriamo per evitare crash
-    if max_vol is not None and max_vol < gmv_vol:
-        max_vol = None 
-
-    # --- STEP 2: Applicazione Vincoli ---
+    # MODIFICA ESATTA: Rimossi tutti i controlli GMV, salvagente e fallback. I vincoli si forzano brutalmente.
     if max_vol is not None:
-        # Volatilità < Max Vol => Max Vol - Volatilità > 0
-        cons.append({'type': 'ineq', 'fun': lambda w: max_vol - get_vol(w)})
+        cons.append({'type': 'ineq', 'fun': lambda w, max_v=max_vol: max_v - get_vol(w)})
         
     if min_vol is not None:
-        # Volatilità > Min Vol => Volatilità - Min Vol > 0
-        cons.append({'type': 'ineq', 'fun': lambda w: get_vol(w) - min_vol})
+        cons.append({'type': 'ineq', 'fun': lambda w, min_v=min_vol: get_vol(w) - min_v})
 
-    # --- STEP 3: Definizione Funzione Obiettivo ---
     if optimization_type == "min_vol":
-        fun = fun_min_vol
+        fun = lambda w: np.dot(w.T, np.dot(cov, w))
     elif optimization_type == "max_sharpe":
-        # Minimizziamo il negativo dello Sharpe
         fun = lambda w: - ((get_ret(w) - 0.02) / get_vol(w))
-    else: # max_return
-        # Minimizziamo il negativo del ritorno
+    else: 
         fun = lambda w: -get_ret(w)
 
-    # --- STEP 4: Esecuzione ---
-    try:
-        res = minimize(fun, init, method='SLSQP', bounds=bounds, constraints=cons, tol=1e-8, options={'maxiter': 1000})
-        
-        if res.success:
-            return res.x
-        else:
-            return res_gmv.x if res_gmv.success else init
-    except:
-        return init
+    # L'ottimizzatore schianta contro il muro se i limiti sono impossibili, ma restituirà l'estremo calcolato
+    res = minimize(fun, init, method='SLSQP', bounds=bounds, constraints=cons, tol=1e-8, options={'maxiter': 2000})
+    
+    return res.x
 
 def run_backtest(returns_log, allocations):
     nav_data = {}
@@ -418,7 +388,6 @@ def parse_vol_choice(choice):
     if choice == "Nessun Limite": return None
     return float(choice.replace('%', '')) / 100
 
-# MODIFICA: Titolo dell'expander modificato e form integrato per gestire il bottone di submit
 with st.sidebar.expander("📉 Parametri Volatilità", expanded=True):
     st.caption("Define volatility corridors.")
     
