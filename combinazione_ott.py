@@ -297,7 +297,7 @@ def style_chart(fig, title):
 # ---------------------------------------------------------
 # INTERFACCIA
 # ---------------------------------------------------------
-st.title("🤖 AI Portfolio Optimizer")
+st.title("⚙️ Portfolio Optimizer")
 st.markdown("<p style='color: #FFFFFF; margin-top: -15px; margin-bottom: 30px; font-family: JetBrains Mono'>Neural-Enhanced Asset Allocation & Risk Analysis System</p>", unsafe_allow_html=True)
 
 # Sidebar
