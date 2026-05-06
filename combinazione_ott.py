@@ -26,8 +26,8 @@ warnings.filterwarnings('ignore')
 # ---------------------------------------------------------
 st.set_page_config(
     layout="wide", 
-    page_title="AI Portfolio Optimizer", 
-    page_icon="🤖"
+    page_title="Portfolio Optimizer", 
+    page_icon="⚙️"
 )
 
 # ---------------------------------------------------------
