@@ -1,16 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import requests
-from io import BytesIO
-from zipfile import ZipFile
-import statsmodels.api as sm
-from sklearn.covariance import LedoitWolf
-from scipy.optimize import minimize
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-import warnings
 
 # Gestione sicura di Matplotlib per lo styling
 try:
@@ -18,8 +9,6 @@ try:
     HAS_MATPLOTLIB = True
 except ImportError:
     HAS_MATPLOTLIB = False
-
-warnings.filterwarnings('ignore')
 
 # ---------------------------------------------------------
 # CONFIGURAZIONE PAGINA
@@ -35,262 +24,141 @@ st.set_page_config(
 # ---------------------------------------------------------
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=JetBrains+Mono:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
 
     .stApp { 
-        background-color: #1A202C; 
-        color: #FFFFFF;
-        font-family: 'Inter', sans-serif; 
+        background-color: #F8FAFC; 
+        color: #0F172A;
+        font-family: 'Fira Sans', sans-serif; 
     }
     
-    p, span, div, label, li { color: #FFFFFF !important; }
+    label, li { color: #0F172A !important; }
 
     [data-testid="stSidebar"] { 
-        background-color: #161B22; 
-        border-right: 1px solid #30363D; 
+        background-color: #FFFFFF; 
+        border-right: 1px solid #DBEAFE; 
     }
     [data-testid="stSidebar"] p, [data-testid="stSidebar"] span, [data-testid="stSidebar"] label {
-        color: #E0E0E0 !important;
+        color: #334155 !important;
     }
     
     [data-testid="stExpander"] summary p {
-        color: #000000 !important;
+        color: #1E3A8A !important;
         font-weight: 700 !important;
     }
     
     h1, h2, h3 { 
-        color: #FFFFFF !important; 
+        color: #0F172A !important; 
         font-weight: 700; 
-        letter-spacing: 0.05em; 
-        text-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+        letter-spacing: 0.02em; 
     }
-    h1 { font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; }
+    h1 { font-family: 'Fira Code', monospace; font-size: 2.35rem; }
     
     div[data-testid="metric-container"] { 
-        background-color: #1C2128; 
-        border: 1px solid #30363D; 
-        border-left: 4px solid #00FFFF; 
-        border-radius: 4px; 
+        background-color: #FFFFFF; 
+        border: 1px solid #DBEAFE; 
+        border-left: 4px solid #1E40AF; 
+        border-radius: 8px; 
         padding: 16px; 
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); 
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06); 
     }
-    [data-testid="stMetricLabel"] { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #CCCCCC !important; }
-    [data-testid="stMetricValue"] { font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; color: #00FFFF !important; text-shadow: 0 0 5px rgba(0, 255, 255, 0.5); }
+    [data-testid="stMetricLabel"] { font-family: 'Fira Code', monospace; font-size: 0.8rem; color: #475569 !important; }
+    [data-testid="stMetricValue"] { font-family: 'Fira Code', monospace; font-size: 1.8rem; color: #1E40AF !important; }
 
     .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] > button { 
-        background: linear-gradient(90deg, #21262d 0%, #0d1117 100%); 
-        color: #00FFFF !important; 
-        border: 1px solid #30363D; 
-        border-radius: 4px; 
-        font-family: 'JetBrains Mono', monospace;
+        background: #1E40AF; 
+        color: #FFFFFF !important; 
+        border: 1px solid #1E40AF; 
+        border-radius: 7px; 
+        font-family: 'Fira Code', monospace;
         font-weight: 600; 
         text-transform: uppercase;
-        letter-spacing: 1px;
-        transition: all 0.3s ease;
+        letter-spacing: 0.04em;
+        min-height: 44px;
+        transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     }
     .stButton > button:hover, .stDownloadButton > button:hover, [data-testid="stFormSubmitButton"] > button:hover { 
-        border-color: #00FFFF; 
-        box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+        background: #1D4ED8;
+        border-color: #1D4ED8; 
+        box-shadow: 0 3px 10px rgba(30, 64, 175, 0.2);
         color: #FFFFFF !important;
     }
+    .stButton > button p, .stDownloadButton > button p, [data-testid="stFormSubmitButton"] > button p { color: #FFFFFF !important; }
 
-    [data-testid="stFileUploader"] { background-color: #161B22; border-radius: 4px; padding: 10px; }
-    [data-testid="stFileUploader"] section { background-color: #161B22 !important; border: 1px dashed #30363D !important; }
-    [data-testid="stFileUploader"] section > div > div > span, [data-testid="stFileUploader"] section > div > div > small { color: #E0E0E0 !important; }
-    [data-testid="stFileUploader"] button { background: linear-gradient(90deg, #21262d 0%, #0d1117 100%); color: #00FFFF !important; border: 1px solid #30363D; }
+    .stButton > button:focus-visible, .stDownloadButton > button:focus-visible, [data-testid="stFormSubmitButton"] > button:focus-visible { outline: 3px solid rgba(30, 64, 175, 0.25); outline-offset: 2px; }
+
+    [data-testid="stFileUploader"] { background-color: #FFFFFF; border: 1px solid #DBEAFE; border-radius: 8px; padding: 10px; }
+    [data-testid="stFileUploader"] section { background-color: #F8FAFC !important; border: 1px dashed #93C5FD !important; }
+    [data-testid="stFileUploader"] section > div > div > span, [data-testid="stFileUploader"] section > div > div > small { color: #475569 !important; }
+    [data-testid="stFileUploader"] button { background: #FFFFFF; color: #1E40AF !important; border: 1px solid #93C5FD; }
 
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { height: 45px; background-color: #161B22; border-radius: 4px; color: #8B949E !important; font-family: 'JetBrains Mono', monospace; border: 1px solid transparent; }
-    .stTabs [aria-selected="true"] { background-color: #21262D; color: #00FFFF !important; border: 1px solid #30363D; border-bottom: 2px solid #00FFFF; }
+    .stTabs [data-baseweb="tab"] { height: 45px; background-color: #FFFFFF; border-radius: 7px 7px 0 0; color: #64748B !important; font-family: 'Fira Code', monospace; border: 1px solid #E2E8F0; }
+    .stTabs [aria-selected="true"] { background-color: #EFF6FF; color: #1E40AF !important; border: 1px solid #BFDBFE; border-bottom: 3px solid #1E40AF; }
     
-    [data-testid="stDataFrame"] { border: 1px solid #30363D; }
+    [data-testid="stDataFrame"] { border: 1px solid #DBEAFE; border-radius: 8px; overflow: hidden; }
     
     /* MODIFICA: Intestazione tabellare evidenziata (Testo più grande, maiuscolo e bordo inferiore marcato) */
-    thead tr th { background-color: #1C2128 !important; color: #00FFFF !important; font-family: 'JetBrains Mono', monospace; font-size: 1.1rem !important; text-transform: uppercase; border-bottom: 2px solid #00FFFF !important; }
+    thead tr th { background-color: #EFF6FF !important; color: #1E3A8A !important; font-family: 'Fira Code', monospace; font-size: 0.95rem !important; text-transform: uppercase; border-bottom: 2px solid #93C5FD !important; }
     
     /* MODIFICA: Rimosso '!important' da background-color per permettere a Pandas di applicare i colori tenui */
-    tbody tr td { color: #FFFFFF !important; font-family: 'Inter', sans-serif; background-color: #0E1117; }
+    tbody tr td { color: #0F172A; font-family: 'Fira Sans', sans-serif; background-color: #FFFFFF; }
     
-    .stSelectbox > div > div, .stMultiSelect > div > div { background-color: #0D1117; color: #FFFFFF !important; border-color: #30363D; }
-    div[data-baseweb="popover"], div[data-baseweb="menu"] { background-color: #161B22 !important; border: 1px solid #30363D; }
-    div[data-baseweb="popover"] li, div[data-baseweb="menu"] li { background-color: #161B22 !important; color: #FFFFFF !important; }
-    div[data-baseweb="popover"] li:hover, div[data-baseweb="menu"] li:hover, div[data-baseweb="popover"] li[aria-selected="true"], div[data-baseweb="menu"] li[aria-selected="true"] { background-color: #21262D !important; color: #00FFFF !important; }
-    [data-baseweb="select"] svg { fill: #FFFFFF !important; }
+    .stSelectbox > div > div, .stMultiSelect > div > div { background-color: #FFFFFF; color: #0F172A !important; border-color: #CBD5E1; }
+    [data-baseweb="tag"] { background-color: #DBEAFE !important; color: #1E3A8A !important; }
+    [data-baseweb="tag"] span { color: #1E3A8A !important; }
+    [data-baseweb="tag"] svg { fill: #1E40AF !important; }
+    div[data-baseweb="popover"], div[data-baseweb="menu"] { background-color: #FFFFFF !important; border: 1px solid #CBD5E1; }
+    div[data-baseweb="popover"] li, div[data-baseweb="menu"] li { background-color: #FFFFFF !important; color: #0F172A !important; }
+    div[data-baseweb="popover"] li:hover, div[data-baseweb="menu"] li:hover, div[data-baseweb="popover"] li[aria-selected="true"], div[data-baseweb="menu"] li[aria-selected="true"] { background-color: #EFF6FF !important; color: #1E40AF !important; }
+    [data-baseweb="select"] svg { fill: #1E40AF !important; }
+    [data-testid="stExpander"], [data-testid="stForm"] { background: #FFFFFF; border-color: #DBEAFE; border-radius: 8px; }
+    hr { border-color: #E2E8F0 !important; }
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            scroll-behavior: auto !important;
+            transition-duration: 0.01ms !important;
+            animation-duration: 0.01ms !important;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------------------------------------------------
-# CORE FUNCTIONS (ENGINEERING & QUANT FIXES)
-# ---------------------------------------------------------
+# Motore quantitativo verificabile separatamente dall'interfaccia Streamlit.
+from portfolio_engine import (
+    FREQUENCY_LABELS,
+    bootstrap_portfolio_intervals,
+    calculate_concentration_metrics,
+    calculate_crisis_correlation,
+    calculate_historical_risk_metrics,
+    calculate_metrics,
+    compute_causal_returns,
+    compute_core_stats,
+    detect_frequency,
+    empirical_cvar,
+    find_high_correlation_pairs,
+    normalize_price_frequency,
+    optimize_basket,
+    process_data_raw,
+    run_walk_forward,
+    validate_weight_bounds,
+)
 
-def detect_frequency(df):
-    if len(df) < 3: return 12 
-    days_diff = (df.index[1] - df.index[0]).days
-    if days_diff >= 28: return 12 
-    elif days_diff >= 5: return 52 
-    else: return 252 
-
-@st.cache_data(show_spinner=False)
-def process_data_raw(file_bytes, filename):
-    separators = [';', ',', '\t']
-    for sep in separators:
-        try:
-            df = pd.read_csv(BytesIO(file_bytes), sep=sep, index_col=0, parse_dates=True, dayfirst=True)
-            if not df.index.is_unique: df = df[~df.index.duplicated(keep='first')]
-            if df.shape[1] > 0:
-                for col in df.columns:
-                    if df[col].dtype == object:
-                        df[col] = df[col].astype(str).str.replace('€','').str.replace('$','').str.strip()
-                        if df[col].str.contains(',').any() and not df[col].str.contains('\.').any():
-                             df[col] = df[col].str.replace(',', '.')
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-                return df, None
-        except Exception as e:
-            continue
-    return None, "Impossibile parsare il file CSV."
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def get_ff5():
-    url = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_5_Factors_2x3_CSV.zip"
-    try:
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            z = ZipFile(BytesIO(r.content))
-            f = z.open([x for x in z.namelist() if 'Factors' in x][0])
-            df = pd.read_csv(f, skiprows=3).rename(columns={'Mkt-RF':'MKT','RF':'RF'}).dropna()
-            df['Date'] = pd.to_datetime(df['Unnamed: 0'].astype(str), format='%Y%m', errors='coerce')
-            df = df.dropna(subset=['Date']).set_index('Date')
-            if not df.index.is_unique: df = df[~df.index.duplicated(keep='first')]
-            simple_ret = df[['MKT','SMB','HML','RF']].astype(float) / 100
-            return np.log(1 + simple_ret)
-    except Exception as e:
-        st.warning(f"Warning: Impossibile scaricare dati Fama-French ({str(e)}). Verranno usati valori proxy.")
-        pass
-    dates = pd.date_range('2000-01-01', datetime.today(), freq='ME')
-    return pd.DataFrame({'MKT':0.006, 'SMB':0.002, 'HML':0.003, 'RF':0.002}, index=dates)
-
-@st.cache_data(show_spinner=False)
-def compute_core_stats(df_subset):
-    df_clean = df_subset.dropna(how='any')
-    if df_clean.empty or len(df_clean) < 3:
-        raise ValueError("Dati insufficienti dopo l'allineamento degli asset storici.")
-    
-    returns_log = np.log(df_clean / df_clean.shift(1)).dropna()
-    freq = detect_frequency(df_clean)
-    
-    ff5_log = get_ff5()
-    
-    rf_annualized = 0.02 
-    try:
-        returns_monthly_proxy = returns_log.resample('ME').sum()
-        returns_monthly_proxy.index = pd.to_datetime(returns_monthly_proxy.index)
-        ff5_log.index = pd.to_datetime(ff5_log.index)
-        common_idx = returns_monthly_proxy.index.intersection(ff5_log.index)
-        
-        if len(common_idx) >= 12:
-            r_aligned = returns_monthly_proxy.loc[common_idx]
-            f_aligned = ff5_log.loc[common_idx]
-            data = pd.concat([r_aligned, f_aligned], axis=1).iloc[-60:]
-            
-            X = sm.add_constant(data[['MKT','SMB','HML']])
-            factors_mean = data[['MKT','SMB','HML']].mean()
-            rf_mean = data['RF'].mean()
-            rf_annualized = rf_mean * 12
-            
-            views_monthly = {}
-            for asset in returns_log.columns:
-                try:
-                    model = sm.OLS(data[asset] - data['RF'], X).fit()
-                    views_monthly[asset] = rf_mean + model.params['const'] + (model.params[['MKT','SMB','HML']] * factors_mean).sum()
-                except:
-                    views_monthly[asset] = data[asset].mean()
-            
-            views_native = {k: v * (12 / freq) for k, v in views_monthly.items()}
-            mu = pd.Series(views_native)
-        else:
-            raise ValueError("Allineamento Fama-French fallito per storico troppo breve.")
-    except Exception as e:
-        raw_means = returns_log.mean()
-        global_mean = raw_means.mean()
-        mu = (raw_means * 0.5) + (global_mean * 0.5) 
-
-    cov_log = LedoitWolf().fit(returns_log).covariance_
-    
-    return returns_log, freq, mu, cov_log, rf_annualized
-
-def calculate_metrics(weights, mu, cov, freq_factor, risk_free_rate):
-    ret_log = np.dot(weights, mu) * freq_factor
-    var_log = np.dot(weights.T, np.dot(cov, weights))
-    vol_log = np.sqrt(var_log) * np.sqrt(freq_factor)
-    sharpe = (ret_log - risk_free_rate) / vol_log if vol_log > 0 else 0
-    
-    asset_vols = np.sqrt(np.diag(cov)) * np.sqrt(freq_factor)
-    weighted_vol = np.dot(weights, asset_vols)
-    div_ratio = weighted_vol / vol_log if vol_log > 0 else 0
-    
-    return ret_log, vol_log, sharpe, div_ratio
-
-def optimize_basket(mu, cov, optimization_type, min_w, max_w, risk_free_rate, max_vol=None, min_vol=None, freq_factor=12):
-    n = len(mu)
-    cons = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-    bounds = tuple((min_w, max_w) for _ in range(n))
-    init = np.full(n, 1/n) 
-
-    def get_vol(w):
-        return np.sqrt(np.dot(w.T, np.dot(cov, w))) * np.sqrt(freq_factor)
-    
-    def get_ret(w):
-        return np.dot(w, mu) * freq_factor
-
-    if max_vol is not None:
-        cons.append({'type': 'ineq', 'fun': lambda w, max_v=max_vol: max_v - get_vol(w)})
-    if min_vol is not None:
-        cons.append({'type': 'ineq', 'fun': lambda w, min_v=min_vol: get_vol(w) - min_v})
-
-    if optimization_type == "min_vol":
-        fun = lambda w: np.dot(w.T, np.dot(cov, w))
-    elif optimization_type == "max_sharpe":
-        fun = lambda w: - ((get_ret(w) - risk_free_rate) / get_vol(w))
-    else: 
-        fun = lambda w: -get_ret(w)
-
-    res = minimize(fun, init, method='SLSQP', bounds=bounds, constraints=cons, tol=1e-8, options={'maxiter': 2000})
-    
-    if not res.success:
-        raise ValueError(f"Ottimizzatore incagliato. {res.message}")
-    return res.x
-
-def run_backtest(returns_log, allocations):
-    simple_returns = np.exp(returns_log) - 1
-    
-    nav_data = {}
-    for name, weights in allocations.items():
-        port_simple_ret = simple_returns.dot(weights)
-        nav = 100 * np.cumprod(1 + port_simple_ret)
-        
-        try:
-            start_date = returns_log.index[0] - timedelta(days=1)
-            nav_with_start = pd.concat([pd.Series([100], index=[start_date]), nav])
-            nav_data[name] = nav_with_start
-        except:
-            nav_data[name] = nav
-        
-    return pd.DataFrame(nav_data).ffill()
 
 def style_chart(fig, title):
-    neon_colors = ['#00FFFF', '#BD00FF', '#00FF9D', '#29B5E8', '#FF0055']
+    chart_colors = ['#1E40AF', '#D97706', '#0F766E', '#7C3AED', '#DC2626']
     fig.update_layout(
-        template="plotly_dark", 
-        title=dict(text=f"<b>{title}</b>", font=dict(size=18, family="JetBrains Mono, monospace", color="#00FFFF"), x=0, y=0.96),
-        colorway=neon_colors, 
+        template="plotly_white", 
+        title=dict(text=f"<b>{title}</b>", font=dict(size=18, family="Fira Code, monospace", color="#1E3A8A"), x=0, y=0.96),
+        colorway=chart_colors, 
         margin=dict(l=20, r=20, t=50, b=20),
         hovermode="x unified",
         paper_bgcolor='rgba(0,0,0,0)', 
-        plot_bgcolor='rgba(0,0,0,0)',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(family="JetBrains Mono, monospace", size=11, color="#E0E0E0")),
-        font=dict(family="Inter, sans-serif", color="#E0E0E0"),
-        xaxis=dict(showgrid=True, gridcolor='#30363D', gridwidth=1),
-        yaxis=dict(showgrid=True, gridcolor='#30363D', gridwidth=1)
+        plot_bgcolor='#FFFFFF',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(family="Fira Code, monospace", size=11, color="#334155")),
+        font=dict(family="Fira Sans, sans-serif", color="#334155"),
+        xaxis=dict(showgrid=True, gridcolor='#E2E8F0', gridwidth=1, zerolinecolor='#CBD5E1'),
+        yaxis=dict(showgrid=True, gridcolor='#E2E8F0', gridwidth=1, zerolinecolor='#CBD5E1')
     )
     return fig
 
@@ -298,37 +166,97 @@ def style_chart(fig, title):
 # INTERFACCIA
 # ---------------------------------------------------------
 st.title("📈 Portfolio Optimizer")
-st.markdown("<p style='color: #FFFFFF; margin-top: -15px; margin-bottom: 30px; font-family: JetBrains Mono'>Neural-Enhanced Asset Allocation & Risk Analysis System</p>", unsafe_allow_html=True)
+st.markdown("<p style='color: #475569; margin-top: -15px; margin-bottom: 30px; font-family: Fira Code'>Constrained Asset Allocation & Risk Analysis System</p>", unsafe_allow_html=True)
 
 # Sidebar
 st.sidebar.header("⚙️ SYSTEM PARAMETERS")
-min_w = st.sidebar.slider("Min % per Asset", 0.0, 0.2, 0.0, 0.01)
-max_w = st.sidebar.slider("Max % per Asset", 0.1, 1.0, 0.35, 0.05)
+frequency_choice = st.sidebar.selectbox(
+    "Frequenza delle serie",
+    [
+        "Rilevamento automatico",
+        "Giornaliera (252)",
+        "Settimanale (52)",
+        "Mensile (12)",
+    ],
+    help=(
+        "Serve esclusivamente ad annualizzare rendimenti e rischio. "
+        "Le osservazioni caricate non vengono ricampionate o aggregate."
+    ),
+)
+mean_shrinkage = st.sidebar.slider(
+    "Prudenza sui rendimenti attesi",
+    0.0,
+    1.0,
+    0.70,
+    0.05,
+    help=(
+        "Riduce l'extra-rendimento storico verso zero. Valori alti producono "
+        "stime più prudenti. Il metodo usa medie winsorizzate e non viene "
+        "presentato come Black–Litterman."
+    ),
+)
+risk_free_rate_pct = st.sidebar.slider(
+    "Tasso privo di rischio annuo",
+    0.0,
+    10.0,
+    2.0,
+    0.25,
+    format="%.2f%%",
+)
+risk_free_rate = risk_free_rate_pct / 100
+transaction_cost_bps = st.sidebar.number_input(
+    "Costo per ribilanciamento (bps)",
+    min_value=0,
+    max_value=200,
+    value=10,
+    step=5,
+    help="Applicato al turnover nella validazione walk-forward.",
+)
+bootstrap_simulations = st.sidebar.number_input(
+    "Simulazioni bootstrap",
+    min_value=100,
+    max_value=2000,
+    value=500,
+    step=100,
+    help=(
+        "Ricampionamento a blocchi delle sole serie caricate per costruire "
+        "intervalli d'incertezza."
+    ),
+)
+st.sidebar.markdown("---")
+min_w_pct = st.sidebar.slider("Min % per Asset", 0, 20, 0, 1)
+max_w_pct = st.sidebar.slider("Max % per Asset", 10, 100, 35, 5)
+min_w = min_w_pct / 100
+max_w = max_w_pct / 100
 st.sidebar.markdown("---")
 
-vol_options = ["Nessun Limite"] + [f"{i}%" for i in [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 18, 20, 25, 30, 40, 50]]
-def parse_vol_choice(choice):
-    if choice == "Nessun Limite": return None
-    return float(choice.replace('%', '')) / 100
-
 with st.sidebar.expander("📉 Parametri Volatilità", expanded=True):
-    st.caption("Define volatility corridors.")
-    with st.form("volatility_form"):
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Ceiling (Max)**")
-            max_cons = st.selectbox("Max Vol Cons.", vol_options, index=0) 
-            max_bal = st.selectbox("Max Vol Bal.", vol_options, index=0)    
-            max_agg = st.selectbox("Max Vol Agg.", vol_options, index=0)    
-        with c2:
-            st.markdown("**Floor (Min)**")
-            min_cons = st.selectbox("Min Vol Cons.", vol_options, index=0)
-            min_bal = st.selectbox("Min Vol Bal.", vol_options, index=0)
-            min_agg = st.selectbox("Min Vol Agg.", vol_options, index=0)
-        submit_vol = st.form_submit_button("RIBILANCIA")
-    
-    max_limits = {"Conservative": parse_vol_choice(max_cons), "Balanced": parse_vol_choice(max_bal), "Aggressive": parse_vol_choice(max_agg)}
-    min_limits = {"Conservative": parse_vol_choice(min_cons), "Balanced": parse_vol_choice(min_bal), "Aggressive": parse_vol_choice(min_agg)}
+    st.caption(
+        "I valori mostrati sono i vincoli effettivamente utilizzati. "
+        "Qualsiasi modifica sostituisce immediatamente il preset iniziale."
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Minima**")
+        min_cons = st.number_input("Conservativa min (%)", 0.0, 100.0, 0.0, 1.0)
+        min_bal = st.number_input("Balanced min (%)", 0.0, 100.0, 15.0, 1.0)
+        min_agg = st.number_input("Aggressive min (%)", 0.0, 100.0, 25.0, 1.0)
+    with c2:
+        st.markdown("**Massima**")
+        max_cons = st.number_input("Conservativa max (%)", 0.0, 100.0, 15.0, 1.0)
+        max_bal = st.number_input("Balanced max (%)", 0.0, 100.0, 25.0, 1.0)
+        max_agg = st.number_input("Aggressive max (%)", 0.0, 100.0, 40.0, 1.0)
+
+    max_limits = {
+        "Conservative": max_cons / 100,
+        "Balanced": max_bal / 100,
+        "Aggressive": max_agg / 100,
+    }
+    min_limits = {
+        "Conservative": min_cons / 100,
+        "Balanced": min_bal / 100,
+        "Aggressive": min_agg / 100,
+    }
 
 # Main
 col_up, col_info = st.columns([1, 2])
@@ -341,21 +269,111 @@ if uploaded:
     if df_raw is None:
         st.error(error_msg); st.stop()
         
-    available_assets = list(df_raw.columns)
+    interpolated_counts = df_raw.attrs.get("interpolated_counts", {})
+    detected_frequency = detect_frequency(df_raw)
+    manual_frequency_map = {
+        "Giornaliera (252)": 252,
+        "Settimanale (52)": 52,
+        "Mensile (12)": 12,
+    }
+    freq = (
+        detected_frequency
+        if frequency_choice == "Rilevamento automatico"
+        else manual_frequency_map[frequency_choice]
+    )
+    df_raw = normalize_price_frequency(df_raw, freq)
+    available_assets = [
+        asset for asset in df_raw.columns
+        if df_raw[asset].notna().sum() >= 3
+    ]
     with col_info:
         st.success("✅ SYSTEM READY: Data Ingested")
         selected_assets = st.multiselect("Active Assets:", options=available_assets, default=available_assets)
+        st.caption(
+            f"Frequenza rilevata: {FREQUENCY_LABELS[detected_frequency]} · "
+            f"Frequenza usata per annualizzare: {FREQUENCY_LABELS[freq]} · "
+            "nessun ricampionamento applicato"
+        )
+        if interpolated_counts:
+            total_filled = sum(interpolated_counts.values())
+            st.caption(
+                f"Ricostruiti {total_filled} piccoli buchi interni con "
+                "interpolazione log-lineare; estremi mancanti non modificati."
+            )
     
     if len(selected_assets) < 2: st.warning("⚠️ CRITICAL: Select at least 2 assets."); st.stop()
 
+    with st.sidebar.expander("Limiti massimi per singolo titolo", expanded=False):
+        capped_assets = st.multiselect(
+            "Titoli con limite personalizzato",
+            options=selected_assets,
+            help="Il limite personalizzato sostituisce il limite massimo generale per il titolo selezionato.",
+        )
+        custom_max_weights = {}
+        for asset in capped_assets:
+            custom_max_pct = st.number_input(
+                f"Peso massimo (%) · {asset}",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(max_w * 100),
+                step=1.0,
+                format="%.1f",
+                key=f"custom_max_{asset}",
+            )
+            custom_max_weights[asset] = custom_max_pct / 100
+
+    min_weights = np.full(len(selected_assets), min_w, dtype=float)
+    max_weights = np.array(
+        [custom_max_weights.get(asset, max_w) for asset in selected_assets],
+        dtype=float,
+    )
+
     try:
-        returns, freq, mu_views, cov, rf_rate = compute_core_stats(df_raw[selected_assets])
+        invalid_corridors = [
+            name for name in min_limits
+            if min_limits[name] > max_limits[name]
+        ]
+        if invalid_corridors:
+            raise ValueError(
+                "La volatilità minima supera la massima per: "
+                + ", ".join(invalid_corridors)
+            )
+        validate_weight_bounds(min_weights, max_weights)
+        selected_prices = df_raw[selected_assets].copy()
+        selected_prices.attrs.update(df_raw.attrs)
+        returns, mu_views, cov, clean_prices = compute_core_stats(
+            selected_prices,
+            freq,
+            mean_shrinkage,
+            risk_free_rate,
+        )
+        causal_returns, _ = compute_causal_returns(selected_prices)
     except ValueError as e:
         st.error(f"Errore computazionale: {str(e)}"); st.stop()
+
+    with col_info:
+        st.caption(
+            f"Rendimenti comuni: {clean_prices.index.min().date()} → "
+            f"{clean_prices.index.max().date()} · "
+            f"{len(returns)} osservazioni · "
+            f"{len(causal_returns)} osservazioni causali per il backtest"
+        )
+        if len(returns) < 2 * freq:
+            st.warning(
+                "Il campione comune copre meno di due anni equivalenti. "
+                "Le stime di rendimento atteso e i portafogli più aggressivi "
+                "possono essere instabili."
+            )
         
     allocations = {}
     metrics = []
-    strategies_config = [("Conservative", "min_vol"), ("Balanced", "max_sharpe"), ("Aggressive", "max_return")]
+    historical_risk = {}
+    concentration_metrics = {}
+    strategies_config = [
+        ("Conservative", "min_cvar"),
+        ("Balanced", "max_sharpe"),
+        ("Aggressive", "cvar_frontier"),
+    ]
     
     calc_success = True
     
@@ -364,12 +382,39 @@ if uploaded:
         mn_vol = min_limits[name]
         
         try:
-            w = optimize_basket(mu_views.values, cov, method, min_w, max_w, rf_rate, max_vol=mx_vol, min_vol=mn_vol, freq_factor=freq)
-            m = calculate_metrics(w, mu_views.values, cov, freq, rf_rate)
+            w = optimize_basket(
+                mu_views.values,
+                cov,
+                method,
+                min_weights,
+                max_weights,
+                risk_free_rate,
+                max_vol=mx_vol,
+                min_vol=mn_vol,
+                frequency=freq,
+                returns_history=returns,
+            )
+            m = calculate_metrics(
+                w,
+                mu_views.values,
+                cov,
+                freq,
+                risk_free_rate,
+            )
             allocations[name] = w
             metrics.append([name] + list(m))
+            historical_risk[name] = calculate_historical_risk_metrics(
+                w,
+                returns,
+                freq,
+                risk_free_rate,
+            )
+            concentration_metrics[name] = calculate_concentration_metrics(
+                w,
+                returns.corr(),
+            )
         except ValueError as e:
-            st.error(f"❌ FALLIMENTO STRATEGIA '{name}': {str(e)} \nI vincoli di volatilità imposti per questa linea sono matematicamente irrealizzabili. Modifica i parametri nella sidebar e clicca Ribilancia.")
+            st.error(f"❌ FALLIMENTO STRATEGIA '{name}': {str(e)}")
             calc_success = False
             break
 
@@ -377,12 +422,33 @@ if uploaded:
         st.stop() 
     
     res_df = pd.DataFrame(metrics, columns=["Linea", "Rendimento", "Volatilità", "Sharpe", "Diversif. Ratio"]).set_index("Linea")
+    risk_df = pd.DataFrame(historical_risk).T
+    concentration_df = pd.DataFrame(concentration_metrics).T
+    bootstrap_intervals, _ = bootstrap_portfolio_intervals(
+        allocations,
+        returns,
+        freq,
+        risk_free_rate,
+        simulations=int(bootstrap_simulations),
+    )
+    high_corr_pairs = find_high_correlation_pairs(returns)
+    active_corridors = pd.DataFrame(
+        {
+            "Volatilità minima": pd.Series(min_limits),
+            "Volatilità massima": pd.Series(max_limits),
+            "Volatilità calcolata": res_df["Volatilità"],
+        }
+    )
+    active_corridors["Vincolo rispettato"] = (
+        (active_corridors["Volatilità calcolata"] >= active_corridors["Volatilità minima"] - 1e-6)
+        & (active_corridors["Volatilità calcolata"] <= active_corridors["Volatilità massima"] + 1e-6)
+    )
     
     # --- VISUALIZZAZIONE ---
     tab1, tab2, tab3, tab4 = st.tabs(["🏆 OPTIMIZER", "🥧 ALLOCATION", "📈 SIMULATION", "🔗 CORRELATION"])
     
     with tab1:
-        st.markdown("### 🧠 Predictive Performance")
+        st.markdown("### 🧠 Expected Risk & Return")
         best = res_df.loc["Balanced"]
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Exp. Return", f"{best['Rendimento']:.1%}")
@@ -391,10 +457,35 @@ if uploaded:
         c4.metric("Div. Score", f"{best['Diversif. Ratio']:.2f}")
         
         st.markdown("#### Strategy Matrix")
+        st.caption(
+            "I rendimenti attesi sono medie winsorizzate con extra-rendimento "
+            "ridotto verso zero. Conservative minimizza il CVaR con la "
+            "formulazione scenario-based; Aggressive seleziona il punto di "
+            "ginocchio della frontiera rendimento–CVaR. Tutte le linee rispettano "
+            "i corridoi di volatilità correnti."
+        )
         if HAS_MATPLOTLIB:
             st.table(res_df.style.format("{:.1%}", subset=["Rendimento", "Volatilità"]).format("{:.2f}", subset=["Sharpe", "Diversif. Ratio"]).background_gradient(cmap="viridis", subset=["Rendimento", "Sharpe"]))
         else:
             st.table(res_df.style.format("{:.1%}", subset=["Rendimento", "Volatilità"]).format("{:.2f}", subset=["Sharpe", "Diversif. Ratio"]))
+
+        st.markdown("#### Corridoi di volatilità attivi")
+        st.caption(
+            "Questi sono i valori correnti inseriti nella sidebar, non i preset "
+            "originari. Se un corridoio non è fattibile il calcolo si interrompe: "
+            "non viene applicato alcun limite alternativo."
+        )
+        st.dataframe(
+            active_corridors.style.format(
+                "{:.2%}",
+                subset=[
+                    "Volatilità minima",
+                    "Volatilità massima",
+                    "Volatilità calcolata",
+                ],
+            ),
+            width="stretch",
+        )
         
         res_export = res_df.copy()
         for col in ["Rendimento", "Volatilità"]: res_export[col] = res_export[col].map('{:.1%}'.format)
@@ -402,12 +493,48 @@ if uploaded:
         
         st.download_button(label="📥 DOWNLOAD METRICS (CSV)", data=res_export.to_csv().encode('utf-8'), file_name='ai_metrics.csv', mime='text/csv')
 
-        fig_ef = px.scatter(res_df, x="Volatilità", y="Rendimento", color="Sharpe", size=[50]*len(res_df), text=res_df.index, color_continuous_scale="Viridis", title="Efficient Frontier")
-        fig_ef.add_trace(go.Scatter(x=res_df["Volatilità"], y=res_df["Rendimento"], mode='lines', line=dict(color='#8B949E', dash='dash', width=1), showlegend=False))
-        fig_ef.update_traces(textposition='top center', textfont=dict(family="JetBrains Mono, monospace", size=12))
-        fig_ef = style_chart(fig_ef, "Efficient Frontier Analysis")
+        fig_ef = px.scatter(res_df, x="Volatilità", y="Rendimento", color="Sharpe", size=[50]*len(res_df), text=res_df.index, color_continuous_scale="Viridis", title="Risk / Return Comparison")
+        fig_ef.update_traces(textposition='top center', textfont=dict(family="Fira Code, monospace", size=12, color="#334155"))
+        fig_ef = style_chart(fig_ef, "Risk / Return Comparison")
         fig_ef.update_layout(xaxis_tickformat=".1%", yaxis_tickformat=".1%")
-        st.plotly_chart(fig_ef, use_container_width=True)
+        st.plotly_chart(fig_ef, width="stretch")
+
+        st.markdown("#### Downside & Stress Metrics")
+        percent_columns = [
+            "Downside Deviation",
+            "VaR 95% (periodo)",
+            "CVaR 95% (periodo)",
+            "Drawdown medio",
+            "Max Drawdown",
+            "Stress storico",
+            "Peggior periodo",
+        ]
+        st.dataframe(
+            risk_df.style
+            .format("{:.2%}", subset=percent_columns)
+            .format("{:.2f}", subset=["Sortino"]),
+            width="stretch",
+        )
+
+        st.markdown("#### Intervalli d'incertezza bootstrap")
+        st.caption(
+            f"Intervallo 5%–95% ottenuto con {int(bootstrap_simulations)} "
+            "ricampionamenti a blocchi. Non utilizza dati esterni."
+        )
+        bootstrap_display = bootstrap_intervals.copy()
+        for column in ["5%", "Mediana", "95%"]:
+            bootstrap_display[column] = bootstrap_display.apply(
+                lambda row: (
+                    f"{row[column]:.2f}"
+                    if row["Metrica"] == "Sharpe"
+                    else f"{row[column]:.2%}"
+                ),
+                axis=1,
+            )
+        st.dataframe(
+            bootstrap_display.set_index(["Linea", "Metrica"]),
+            width="stretch",
+        )
 
     with tab2:
         st.markdown("### 🧬 Asset DNA (Composition)")
@@ -417,70 +544,249 @@ if uploaded:
         # MODIFICA: Funzione per applicare colori tenui e differenziati per ogni singola colonna
         def highlight_cols(s):
             if s.name == 'Conservative':
-                return ['background-color: rgba(0, 255, 255, 0.1)'] * len(s) # Ciano tenue
+                return ['background-color: rgba(30, 64, 175, 0.08)'] * len(s)
             elif s.name == 'Balanced':
-                return ['background-color: rgba(189, 0, 255, 0.1)'] * len(s) # Viola tenue
+                return ['background-color: rgba(217, 119, 6, 0.08)'] * len(s)
             elif s.name == 'Aggressive':
-                return ['background-color: rgba(255, 0, 85, 0.1)'] * len(s)  # Rosa tenue
+                return ['background-color: rgba(220, 38, 38, 0.08)'] * len(s)
             return [''] * len(s)
             
         styled_w = w_clean.style.format("{:.1%}").apply(highlight_cols, axis=0)
-        st.dataframe(styled_w, height=500, use_container_width=True)
+        st.dataframe(styled_w, height=500, width="stretch")
         
-        w_export = w_clean.applymap(lambda x: '{:.1%}'.format(x))
+        w_export = w_clean.map(lambda x: '{:.1%}'.format(x))
         st.download_button(label="📥 DOWNLOAD ALLOCATION (CSV)", data=w_export.to_csv().encode('utf-8'), file_name='ai_allocation.csv', mime='text/csv')
 
         df_melt = w_clean.reset_index().melt(id_vars="index", var_name="Strategia", value_name="Peso")
         fig_bar = px.bar(df_melt, x="Strategia", y="Peso", color="index", text_auto=".0%", title="Allocation Breakdown")
         fig_bar = style_chart(fig_bar, "Strategic Allocation")
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, width="stretch")
+
+        st.markdown("#### Concentrazione e sovrapposizione statistica")
+        st.caption(
+            "La sovrapposizione è inferita esclusivamente dalle correlazioni "
+            "storiche: non rappresenta il look-through delle partecipazioni "
+            "interne agli ETF."
+        )
+        st.dataframe(
+            concentration_df.style
+            .format(
+                "{:.2f}",
+                subset=[
+                    "HHI",
+                    "Numero effettivo titoli",
+                    "Correlazione ponderata",
+                    "Sovrapposizione statistica",
+                ],
+            )
+            .format("{:.1%}", subset=["Peso primi 3"]),
+            width="stretch",
+        )
 
     with tab3:
-        st.markdown(f"### 🕰️ Backtest Simulation")
-        nav_df = run_backtest(returns, allocations)
+        st.markdown("### 🕰️ Walk-Forward Validation")
+        try:
+            (
+                nav_df,
+                test_start,
+                walk_summary,
+                gross_nav_df,
+                rebalance_diagnostics,
+            ) = run_walk_forward(
+                causal_returns,
+                strategies_config,
+                min_weights,
+                max_weights,
+                risk_free_rate,
+                max_limits,
+                min_limits,
+                freq,
+                mean_shrinkage,
+                transaction_cost_bps,
+            )
+        except ValueError as e:
+            st.warning(f"Validazione fuori campione non disponibile: {str(e)}")
+            st.stop()
+        st.caption(
+            f"Periodo fuori campione dal {nav_df.index[1].date()} · "
+            f"Ribilanciamento periodico causale · Costi: "
+            f"{transaction_cost_bps} bps sul turnover one-way · "
+            f"Benchmark: Equal Weight"
+        )
         
         days = (nav_df.index[-1] - nav_df.index[0]).days
         cagr = (nav_df.iloc[-1] / 100) ** (365.25 / days) - 1
-        nav_log_ret = np.log(nav_df / nav_df.shift(1)).dropna()
-        vol_real = nav_log_ret.std() * np.sqrt(freq)
+        nav_period_ret = nav_df.pct_change(fill_method=None).dropna()
+        vol_real = nav_period_ret.std() * np.sqrt(freq)
+        annual_mean_return = nav_period_ret.mean() * freq
+        sharpe_real = (
+            annual_mean_return - risk_free_rate
+        ) / vol_real.replace(0, np.nan)
         dd = (nav_df / nav_df.cummax() - 1).min()
-        
-        perf_hist = pd.DataFrame({"CAGR": cagr, "Volatilità": vol_real, "Max Drawdown": dd})
+        downside = np.minimum(
+            nav_period_ret - risk_free_rate / freq,
+            0,
+        )
+        downside_dev = np.sqrt((downside ** 2).mean()) * np.sqrt(freq)
+        sortino_real = (cagr - risk_free_rate) / downside_dev.replace(0, np.nan)
+        var_real = -nav_period_ret.quantile(0.05).clip(upper=0)
+        cvar_real = pd.Series(
+            {
+                column: empirical_cvar(series, 0.95)
+                for column, series in nav_period_ret.items()
+            }
+        )
+
+        perf_hist = pd.DataFrame(
+            {
+                "CAGR": cagr,
+                "Volatilità": vol_real,
+                "Sharpe": sharpe_real,
+                "Sortino": sortino_real,
+                "CVaR 95% (periodo)": cvar_real,
+                "Max Drawdown": dd,
+            }
+        )
         
         c_kpi, c_plot = st.columns([1, 2])
         with c_kpi:
             st.markdown("#### Realized Results")
             if HAS_MATPLOTLIB:
-                st.table(perf_hist.style.format("{:.2%}").background_gradient(cmap="RdYlGn", subset=["CAGR"]))
+                st.table(
+                    perf_hist.style
+                    .format(
+                        "{:.2%}",
+                        subset=[
+                            "CAGR",
+                            "Volatilità",
+                            "CVaR 95% (periodo)",
+                            "Max Drawdown",
+                        ],
+                    )
+                    .format("{:.2f}", subset=["Sharpe", "Sortino"])
+                    .background_gradient(cmap="RdYlGn", subset=["CAGR"])
+                )
             else:
-                st.table(perf_hist.style.format("{:.2%}"))
+                st.table(perf_hist)
             
         with c_plot:
             fig_nav = px.line(nav_df, title="Capital Growth (Base 100)")
             fig_nav = style_chart(fig_nav, "Equity Line Evolution")
-            st.plotly_chart(fig_nav, use_container_width=True)
+            st.plotly_chart(fig_nav, width="stretch")
+
+        st.markdown("#### Rischio previsto e realizzato")
+        walk_percent_columns = [
+            "Volatilità prevista media",
+            "Volatilità realizzata",
+            "CVaR realizzato",
+            "Costi cumulati",
+        ]
+        st.dataframe(
+            walk_summary.style
+            .format("{:.2%}", subset=walk_percent_columns)
+            .format(
+                "{:.2f}",
+                subset=[
+                    "Sharpe realizzato",
+                    "Turnover cumulato",
+                    "Drag costi su NAV",
+                ],
+            )
+            .format("{:.0f}", subset=["Ribilanciamenti"]),
+            width="stretch",
+        )
+        st.caption(
+            "Il rispetto del corridoio in questa tabella è valutato sulla "
+            "volatilità effettivamente realizzata fuori campione; può differire "
+            "dal vincolo ex ante, che resta sempre rispettato dall'ottimizzatore."
+        )
+
+        cost_comparison = pd.DataFrame(
+            {
+                "NAV lorda": gross_nav_df.iloc[-1],
+                "NAV netta": nav_df.iloc[-1],
+                "Impatto costi": gross_nav_df.iloc[-1] - nav_df.iloc[-1],
+            }
+        )
+        st.markdown("#### Turnover e impatto dei costi")
+        st.dataframe(cost_comparison.style.format("{:.2f}"), width="stretch")
+        with st.expander("Dettaglio dei ribilanciamenti", expanded=False):
+            st.dataframe(
+                rebalance_diagnostics.style
+                .format(
+                    "{:.2%}",
+                    subset=[
+                        "Volatilità prevista",
+                        "Rendimento previsto",
+                        "CVaR previsto",
+                        "Costo",
+                    ],
+                )
+                .format("{:.2f}", subset=["Turnover"]),
+                width="stretch",
+            )
             
         drawdown_df = nav_df / nav_df.cummax() - 1
         with st.expander("📉 Deep Drawdown Analysis", expanded=True):
             fig_dd = px.line(drawdown_df, title="Underwater Plot")
             fig_dd = style_chart(fig_dd, "Drawdown Depth")
-            fig_dd.update_traces(fill='tozeroy', line=dict(color='#FF0055')) 
+            fig_dd.update_traces(fill='tozeroy', line=dict(color='#DC2626')) 
             fig_dd.update_yaxes(tickformat=".1%", range=[None, 0.005]) 
-            st.plotly_chart(fig_dd, use_container_width=True)
+            st.plotly_chart(fig_dd, width="stretch")
 
     with tab4:
         st.markdown("### 🔗 Network Correlation")
         corr_matrix = returns.corr()
+        crisis_corr, crisis_average, crisis_observations, crisis_threshold = (
+            calculate_crisis_correlation(returns)
+        )
         
         fig_corr = px.imshow(corr_matrix, text_auto=".2f", aspect="auto", color_continuous_scale="RdBu_r", zmin=-1, zmax=1)
-        fig_corr.update_layout(title="Correlation Heatmap", template="plotly_dark", height=700, font=dict(family="JetBrains Mono, monospace"))
-        st.plotly_chart(fig_corr, use_container_width=True)
+        fig_corr.update_layout(title="Correlation Heatmap", template="plotly_white", height=700, font=dict(family="Fira Sans, sans-serif", color="#334155"))
+        st.plotly_chart(fig_corr, width="stretch")
+
+        st.markdown("#### Coppie con elevata sovrapposizione statistica")
+        if high_corr_pairs.empty:
+            st.info(
+                "Nessuna coppia presenta correlazione storica pari o superiore "
+                "a 0,70 nel campione caricato."
+            )
+        else:
+            st.dataframe(
+                high_corr_pairs.style.format(
+                    "{:.2f}",
+                    subset=["Correlazione"],
+                ),
+                width="stretch",
+            )
+
+        st.markdown("#### Correlazioni nei periodi di stress")
+        st.caption(
+            f"Peggior 20% delle osservazioni del paniere equal-weight "
+            f"({crisis_observations} periodi; soglia {crisis_threshold:.2%}). "
+            f"Correlazione media tra titoli: {crisis_average:.2f}."
+        )
+        fig_crisis = px.imshow(
+            crisis_corr,
+            text_auto=".2f",
+            aspect="auto",
+            color_continuous_scale="RdBu_r",
+            zmin=-1,
+            zmax=1,
+        )
+        fig_crisis.update_layout(
+            title="Historical Stress Correlation",
+            template="plotly_white",
+            height=700,
+            font=dict(family="Fira Sans, sans-serif", color="#334155"),
+        )
+        st.plotly_chart(fig_crisis, width="stretch")
         
         with st.expander("📋 View Raw Data"):
             if HAS_MATPLOTLIB:
-                st.dataframe(corr_matrix.style.background_gradient(cmap="RdBu_r", vmin=-1, vmax=1).format("{:.2f}"), height=400, use_container_width=True)
+                st.dataframe(corr_matrix.style.background_gradient(cmap="RdBu_r", vmin=-1, vmax=1).format("{:.2f}"), height=400, width="stretch")
             else:
-                st.dataframe(corr_matrix.style.format("{:.2f}"), height=400, use_container_width=True)
+                st.dataframe(corr_matrix.style.format("{:.2f}"), height=400, width="stretch")
 
 else:
     st.info("👋 SYSTEM STANDBY. Initialize by uploading CSV data.")
