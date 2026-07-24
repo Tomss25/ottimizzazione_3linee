@@ -9,8 +9,15 @@ Web app Streamlit per costruire tre allocazioni long-only:
 - limiti massimi personalizzati per titolo;
 - rendimenti attesi robusti con winsorization e shrinkage;
 - bootstrap a blocchi e intervalli d'incertezza;
-- walk-forward causale con turnover e costi;
+- walk-forward OOS causale con turnover e costi;
+- benchmark diagnostici GMV Ledoit-Wolf, HRP vincolato ed Equal Weight vincolato;
+- Sharpe previsto e Sharpe OOS netto affiancati nella tabella principale;
 - misure di drawdown, Sortino, Sharpe, CVaR e concentrazione.
+
+I benchmark rispettano i limiti per singolo titolo ma non vengono forzati nei
+corridoi di volatilità delle tre linee. Servono per verificare fuori campione se
+la maggiore complessità del modello produce risultati migliori rispetto ad
+allocazioni indipendenti dai rendimenti attesi.
 
 ## Installazione
 

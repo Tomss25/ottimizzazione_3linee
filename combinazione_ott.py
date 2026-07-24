@@ -374,6 +374,10 @@ if uploaded:
         ("Balanced", "max_sharpe"),
         ("Aggressive", "cvar_frontier"),
     ]
+    benchmark_strategies_config = [
+        ("GMV Ledoit-Wolf", "gmv"),
+        ("HRP vincolato", "hrp"),
+    ]
     
     calc_success = True
     
@@ -422,6 +426,48 @@ if uploaded:
         st.stop() 
     
     res_df = pd.DataFrame(metrics, columns=["Linea", "Rendimento", "Volatilità", "Sharpe", "Diversif. Ratio"]).set_index("Linea")
+    benchmark_allocations = {}
+    benchmark_metrics = []
+    available_benchmark_strategies = []
+    for name, method in benchmark_strategies_config:
+        try:
+            weights = optimize_basket(
+                mu_views.values,
+                cov,
+                method,
+                min_weights,
+                max_weights,
+                risk_free_rate,
+                frequency=freq,
+                returns_history=returns,
+            )
+            benchmark_allocations[name] = weights
+            benchmark_metrics.append(
+                [name]
+                + list(
+                    calculate_metrics(
+                        weights,
+                        mu_views.values,
+                        cov,
+                        freq,
+                        risk_free_rate,
+                    )
+                )
+            )
+            available_benchmark_strategies.append((name, method))
+        except ValueError as error:
+            st.warning(f"Benchmark '{name}' non disponibile: {error}")
+
+    benchmark_df = pd.DataFrame(
+        benchmark_metrics,
+        columns=[
+            "Benchmark",
+            "Rendimento",
+            "Volatilità",
+            "Sharpe",
+            "Diversif. Ratio",
+        ],
+    ).set_index("Benchmark")
     risk_df = pd.DataFrame(historical_risk).T
     concentration_df = pd.DataFrame(concentration_metrics).T
     bootstrap_intervals, _ = bootstrap_portfolio_intervals(
@@ -444,6 +490,49 @@ if uploaded:
         & (active_corridors["Volatilità calcolata"] <= active_corridors["Volatilità massima"] + 1e-6)
     )
     
+    walk_result = None
+    walk_error = None
+    try:
+        walk_result = run_walk_forward(
+            causal_returns,
+            strategies_config + available_benchmark_strategies,
+            min_weights,
+            max_weights,
+            risk_free_rate,
+            max_limits,
+            min_limits,
+            freq,
+            mean_shrinkage,
+            transaction_cost_bps,
+        )
+    except ValueError as error:
+        walk_error = str(error)
+
+    strategy_matrix_df = res_df.rename(
+        columns={"Sharpe": "Sharpe previsto"}
+    ).copy()
+    strategy_matrix_df["Sharpe OOS netto"] = np.nan
+    if walk_result is not None:
+        (
+            nav_df,
+            test_start,
+            walk_summary,
+            gross_nav_df,
+            rebalance_diagnostics,
+        ) = walk_result
+        strategy_matrix_df["Sharpe OOS netto"] = walk_summary.reindex(
+            strategy_matrix_df.index
+        )["Sharpe realizzato"]
+    strategy_matrix_df = strategy_matrix_df[
+        [
+            "Rendimento",
+            "Volatilità",
+            "Sharpe previsto",
+            "Sharpe OOS netto",
+            "Diversif. Ratio",
+        ]
+    ]
+
     # --- VISUALIZZAZIONE ---
     tab1, tab2, tab3, tab4 = st.tabs(["🏆 OPTIMIZER", "🥧 ALLOCATION", "📈 SIMULATION", "🔗 CORRELATION"])
     
@@ -453,7 +542,7 @@ if uploaded:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Exp. Return", f"{best['Rendimento']:.1%}")
         c2.metric("Exp. Volatility", f"{best['Volatilità']:.1%}")
-        c3.metric("Sharpe Ratio", f"{best['Sharpe']:.2f}")
+        c3.metric("Sharpe previsto", f"{best['Sharpe']:.2f}")
         c4.metric("Div. Score", f"{best['Diversif. Ratio']:.2f}")
         
         st.markdown("#### Strategy Matrix")
@@ -462,12 +551,41 @@ if uploaded:
             "ridotto verso zero. Conservative minimizza il CVaR con la "
             "formulazione scenario-based; Aggressive seleziona il punto di "
             "ginocchio della frontiera rendimento–CVaR. Tutte le linee rispettano "
-            "i corridoi di volatilità correnti."
+            "i corridoi di volatilità correnti. Lo Sharpe OOS netto usa soltanto "
+            "dati successivi alla stima dei pesi e include i costi."
         )
         if HAS_MATPLOTLIB:
-            st.table(res_df.style.format("{:.1%}", subset=["Rendimento", "Volatilità"]).format("{:.2f}", subset=["Sharpe", "Diversif. Ratio"]).background_gradient(cmap="viridis", subset=["Rendimento", "Sharpe"]))
+            st.table(
+                strategy_matrix_df.style
+                .format("{:.1%}", subset=["Rendimento", "Volatilità"])
+                .format(
+                    "{:.2f}",
+                    subset=[
+                        "Sharpe previsto",
+                        "Sharpe OOS netto",
+                        "Diversif. Ratio",
+                    ],
+                )
+                .background_gradient(
+                    cmap="viridis",
+                    subset=["Rendimento", "Sharpe OOS netto"],
+                )
+            )
         else:
-            st.table(res_df.style.format("{:.1%}", subset=["Rendimento", "Volatilità"]).format("{:.2f}", subset=["Sharpe", "Diversif. Ratio"]))
+            st.table(
+                strategy_matrix_df.style
+                .format("{:.1%}", subset=["Rendimento", "Volatilità"])
+                .format(
+                    "{:.2f}",
+                    subset=[
+                        "Sharpe previsto",
+                        "Sharpe OOS netto",
+                        "Diversif. Ratio",
+                    ],
+                )
+            )
+        if walk_error is not None:
+            st.info(f"Sharpe OOS non disponibile: {walk_error}")
 
         st.markdown("#### Corridoi di volatilità attivi")
         st.caption(
@@ -487,9 +605,23 @@ if uploaded:
             width="stretch",
         )
         
-        res_export = res_df.copy()
+        if not benchmark_df.empty:
+            st.markdown("#### Benchmark diagnostici")
+            st.caption(
+                "GMV e HRP rispettano i limiti minimi e massimi per titolo, "
+                "ma non sono forzati nei corridoi delle tre linee. Servono come "
+                "controllo indipendente, non come quarta o quinta proposta."
+            )
+            st.dataframe(
+                benchmark_df.style
+                .format("{:.1%}", subset=["Rendimento", "Volatilità"])
+                .format("{:.2f}", subset=["Sharpe", "Diversif. Ratio"]),
+                width="stretch",
+            )
+
+        res_export = strategy_matrix_df.copy()
         for col in ["Rendimento", "Volatilità"]: res_export[col] = res_export[col].map('{:.1%}'.format)
-        for col in ["Sharpe", "Diversif. Ratio"]: res_export[col] = res_export[col].map('{:.2f}'.format)
+        for col in ["Sharpe previsto", "Sharpe OOS netto", "Diversif. Ratio"]: res_export[col] = res_export[col].map('{:.2f}'.format)
         
         st.download_button(label="📥 DOWNLOAD METRICS (CSV)", data=res_export.to_csv().encode('utf-8'), file_name='ai_metrics.csv', mime='text/csv')
 
@@ -553,6 +685,18 @@ if uploaded:
             
         styled_w = w_clean.style.format("{:.1%}").apply(highlight_cols, axis=0)
         st.dataframe(styled_w, height=500, width="stretch")
+
+        if benchmark_allocations:
+            with st.expander("Pesi dei benchmark diagnostici", expanded=False):
+                benchmark_weights_df = pd.DataFrame(
+                    benchmark_allocations,
+                    index=returns.columns,
+                )
+                st.dataframe(
+                    benchmark_weights_df.style.format("{:.1%}"),
+                    height=500,
+                    width="stretch",
+                )
         
         w_export = w_clean.map(lambda x: '{:.1%}'.format(x))
         st.download_button(label="📥 DOWNLOAD ALLOCATION (CSV)", data=w_export.to_csv().encode('utf-8'), file_name='ai_allocation.csv', mime='text/csv')
@@ -585,33 +729,16 @@ if uploaded:
 
     with tab3:
         st.markdown("### 🕰️ Walk-Forward Validation")
-        try:
-            (
-                nav_df,
-                test_start,
-                walk_summary,
-                gross_nav_df,
-                rebalance_diagnostics,
-            ) = run_walk_forward(
-                causal_returns,
-                strategies_config,
-                min_weights,
-                max_weights,
-                risk_free_rate,
-                max_limits,
-                min_limits,
-                freq,
-                mean_shrinkage,
-                transaction_cost_bps,
+        if walk_result is None:
+            st.warning(
+                f"Validazione fuori campione non disponibile: {walk_error}"
             )
-        except ValueError as e:
-            st.warning(f"Validazione fuori campione non disponibile: {str(e)}")
             st.stop()
         st.caption(
             f"Periodo fuori campione dal {nav_df.index[1].date()} · "
             f"Ribilanciamento periodico causale · Costi: "
             f"{transaction_cost_bps} bps sul turnover one-way · "
-            f"Benchmark: Equal Weight"
+            "Benchmark: Equal Weight vincolato, GMV Ledoit-Wolf e HRP vincolato"
         )
         
         days = (nav_df.index[-1] - nav_df.index[0]).days
@@ -698,7 +825,9 @@ if uploaded:
         st.caption(
             "Il rispetto del corridoio in questa tabella è valutato sulla "
             "volatilità effettivamente realizzata fuori campione; può differire "
-            "dal vincolo ex ante, che resta sempre rispettato dall'ottimizzatore."
+            "dal vincolo ex ante, che resta sempre rispettato dall'ottimizzatore. "
+            "Per i benchmark il campo non è applicabile perché non viene imposto "
+            "un corridoio di linea."
         )
 
         cost_comparison = pd.DataFrame(

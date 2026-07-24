@@ -3,7 +3,9 @@ from io import BytesIO
 
 import numpy as np
 import pandas as pd
+import scipy.cluster.hierarchy as hierarchy
 from scipy.optimize import linprog, minimize
+from scipy.spatial.distance import squareform
 from sklearn.covariance import LedoitWolf
 
 
@@ -424,6 +426,62 @@ def _portfolio_volatility(weights, cov, frequency):
     return float(np.sqrt(max(weights @ cov @ weights, 0)) * np.sqrt(frequency))
 
 
+def _inverse_variance_weights(covariance):
+    diagonal = np.clip(np.diag(covariance), 1e-16, None)
+    inverse = 1.0 / diagonal
+    return inverse / inverse.sum()
+
+
+def _cluster_variance(covariance, indices):
+    cluster_covariance = covariance[np.ix_(indices, indices)]
+    cluster_weights = _inverse_variance_weights(cluster_covariance)
+    return float(cluster_weights @ cluster_covariance @ cluster_weights)
+
+
+def _hrp_target_weights(covariance):
+    """Calcola HRP tramite clustering gerarchico e bisezione ricorsiva."""
+    covariance = np.asarray(covariance, dtype=float)
+    asset_count = covariance.shape[0]
+    if asset_count == 1:
+        return np.ones(1)
+
+    volatility = np.sqrt(np.clip(np.diag(covariance), 1e-16, None))
+    correlation = covariance / np.outer(volatility, volatility)
+    correlation = np.clip(correlation, -1.0, 1.0)
+    np.fill_diagonal(correlation, 1.0)
+    distance = np.sqrt(np.clip((1.0 - correlation) / 2.0, 0.0, 1.0))
+    linkage = hierarchy.linkage(
+        squareform(distance, checks=False),
+        method="single",
+        optimal_ordering=True,
+    )
+    ordered = hierarchy.leaves_list(linkage).astype(int).tolist()
+
+    weights = np.ones(asset_count, dtype=float)
+    clusters = [ordered]
+    while clusters:
+        next_clusters = []
+        for cluster in clusters:
+            if len(cluster) <= 1:
+                continue
+            split = len(cluster) // 2
+            left = cluster[:split]
+            right = cluster[split:]
+            left_variance = _cluster_variance(covariance, left)
+            right_variance = _cluster_variance(covariance, right)
+            total_variance = left_variance + right_variance
+            left_share = (
+                right_variance / total_variance
+                if total_variance > 1e-16
+                else 0.5
+            )
+            weights[left] *= left_share
+            weights[right] *= 1.0 - left_share
+            next_clusters.extend([left, right])
+        clusters = next_clusters
+    return weights / weights.sum()
+
+
 def _solve_min_cvar_lp(
     returns_history,
     lower,
@@ -618,7 +676,17 @@ def optimize_basket(
         else np.asarray(returns_history, dtype=float)
     )
 
-    if optimization_type == "min_cvar":
+    if optimization_type == "hrp":
+        weights = _project_to_volatility_corridor(
+            _hrp_target_weights(cov),
+            lower,
+            upper,
+            cov,
+            frequency,
+            min_vol,
+            max_vol,
+        )
+    elif optimization_type == "min_cvar":
         if returns_array is None:
             raise ValueError("Lo storico è necessario per il CVaR.")
         weights = _solve_min_cvar_lp(returns_array, lower, upper)
@@ -681,6 +749,8 @@ def optimize_basket(
                 ) + concentration_penalty
             if optimization_type == "min_vol":
                 return float(w @ cov @ w) + concentration_penalty
+            if optimization_type == "gmv":
+                return float(w @ cov @ w)
             if optimization_type == "max_return":
                 return -expected_return(w) + concentration_penalty
             raise ValueError(f"Obiettivo sconosciuto: {optimization_type}")
@@ -879,6 +949,8 @@ def run_walk_forward(
         test_dates.extend(test_block.index.tolist())
 
         for name, method in strategies_config:
+            maximum_limit = max_limits.get(name)
+            minimum_limit = min_limits.get(name)
             target_weights = optimize_basket(
                 mu.values,
                 cov,
@@ -886,8 +958,8 @@ def run_walk_forward(
                 min_weights,
                 max_weights,
                 risk_free_rate,
-                max_vol=max_limits[name],
-                min_vol=min_limits[name],
+                max_vol=maximum_limit,
+                min_vol=minimum_limit,
                 frequency=frequency,
                 returns_history=training_returns,
             )
@@ -920,7 +992,19 @@ def run_walk_forward(
                 }
             )
 
-        equal_weights = np.full(asset_count, 1 / asset_count)
+        equal_weights = _project_to_volatility_corridor(
+            np.full(asset_count, 1 / asset_count),
+            np.asarray(min_weights, dtype=float),
+            np.asarray(max_weights, dtype=float),
+            cov,
+            frequency,
+            None,
+            None,
+        )
+        if equal_weights is None:
+            raise ValueError(
+                "Impossibile costruire il benchmark Equal Weight entro i limiti."
+            )
         net, gross, ending_weights, turnover, cost = _apply_block_with_drift(
             test_block,
             equal_weights,

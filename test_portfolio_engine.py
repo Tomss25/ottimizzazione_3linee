@@ -79,6 +79,31 @@ class PortfolioEngineTests(unittest.TestCase):
         self.assertGreaterEqual(volatility, 0.10 - 1e-6)
         self.assertLessEqual(volatility, 0.30 + 1e-6)
 
+    def test_hrp_and_gmv_benchmarks_respect_asset_bounds(self):
+        mu, cov, _ = estimate_mu_cov(
+            self.returns,
+            prior_strength=0.7,
+            frequency=252,
+            risk_free_rate=0.02,
+        )
+        lower = np.array([0.05, 0.00, 0.00, 0.00])
+        upper = np.array([0.30, 0.45, 0.45, 0.45])
+        for method in ("hrp", "gmv"):
+            with self.subTest(method=method):
+                weights = optimize_basket(
+                    mu.to_numpy(),
+                    cov,
+                    method,
+                    lower,
+                    upper,
+                    0.02,
+                    frequency=252,
+                    returns_history=self.returns,
+                )
+                self.assertAlmostEqual(weights.sum(), 1.0, places=7)
+                self.assertTrue(np.all(weights >= lower - 1e-7))
+                self.assertTrue(np.all(weights <= upper + 1e-7))
+
     def test_walk_forward_reports_costs_and_realized_risk(self):
         lower = np.zeros(4)
         upper = np.full(4, 0.70)
@@ -102,9 +127,47 @@ class PortfolioEngineTests(unittest.TestCase):
             10,
         )
         self.assertIn("Volatilità realizzata", summary.columns)
+        self.assertIn("Sharpe realizzato", summary.columns)
         self.assertIn("Turnover cumulato", summary.columns)
         self.assertGreater(len(diagnostics), 0)
         self.assertTrue((gross_nav.iloc[-1] >= nav.iloc[-1]).all())
+
+    def test_walk_forward_includes_oos_challenger_benchmarks(self):
+        lower = np.zeros(4)
+        upper = np.array([0.30, 0.45, 0.45, 0.45])
+        strategies = [
+            ("Conservative", "min_cvar"),
+            ("Balanced", "max_sharpe"),
+            ("Aggressive", "cvar_frontier"),
+            ("GMV Ledoit-Wolf", "gmv"),
+            ("HRP vincolato", "hrp"),
+        ]
+        minimum = {"Conservative": 0.0, "Balanced": 0.08, "Aggressive": 0.10}
+        maximum = {"Conservative": 0.20, "Balanced": 0.30, "Aggressive": 0.40}
+        nav, _, summary, _, diagnostics = run_walk_forward(
+            self.returns,
+            strategies,
+            lower,
+            upper,
+            0.02,
+            maximum,
+            minimum,
+            252,
+            0.70,
+            10,
+        )
+        for name in ("GMV Ledoit-Wolf", "HRP vincolato", "Equal Weight"):
+            self.assertIn(name, nav.columns)
+            self.assertIn(name, summary.index)
+        benchmark_corridor = summary.loc[
+            ["GMV Ledoit-Wolf", "HRP vincolato", "Equal Weight"],
+            "Corridoio realizzato rispettato",
+        ]
+        self.assertTrue(benchmark_corridor.isna().all())
+        self.assertTrue(
+            set(diagnostics["Linea"])
+            >= {"GMV Ledoit-Wolf", "HRP vincolato", "Equal Weight"}
+        )
 
 
 if __name__ == "__main__":
