@@ -3,6 +3,10 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from pathlib import Path
+from html.parser import HTMLParser
+import json
+import re
+from uuid import uuid4
 
 # Gestione sicura di Matplotlib per lo styling
 try:
@@ -77,6 +81,122 @@ def style_signed_metric(value):
     if value < 0:
         return "color: #B83859; background-color: #FBEFF2"
     return "color: #096C4C; background-color: #E0F1E7"
+
+
+class _StyledCellsParser(HTMLParser):
+    """Extract the displayed body values from a pandas Styler table."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.in_body = False
+        self.in_cell = False
+        self.rows = []
+        self.row = []
+        self.cell = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "tbody":
+            self.in_body = True
+        elif self.in_body and tag == "tr":
+            self.row = []
+        elif self.in_body and tag == "td":
+            self.in_cell = True
+            self.cell = []
+
+    def handle_data(self, data):
+        if self.in_cell:
+            self.cell.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "td" and self.in_cell:
+            self.row.append("".join(self.cell))
+            self.in_cell = False
+        elif tag == "tr" and self.in_body:
+            self.rows.append(self.row)
+        elif tag == "tbody":
+            self.in_body = False
+
+
+def _excel_cell(value):
+    """Keep pasted columns intact and use Italian decimal separators for Excel."""
+    if value is None or (isinstance(value, (float, np.floating)) and pd.isna(value)):
+        return ""
+    result = str(value).replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
+    if re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?%?", result):
+        return result.replace(".", ",")
+    if result.startswith(("=", "+", "-", "@")):
+        return "'" + result
+    return result
+
+
+def _table_tsv(data):
+    """Copy all rows, including index labels, in their displayed order."""
+    if isinstance(data, pd.io.formats.style.Styler):
+        frame = data.data
+        parser = _StyledCellsParser()
+        parser.feed(data.to_html())
+        body = parser.rows
+        if len(body) != len(frame) or any(len(row) != len(frame.columns) for row in body):
+            raise ValueError("Impossibile preparare la tabella per la copia.")
+    else:
+        frame = data
+        body = frame.values.tolist()
+
+    index_names = [name if name is not None else "" for name in frame.index.names]
+    rows = [index_names + list(frame.columns)]
+    for index, values in zip(frame.index, body):
+        labels = list(index) if isinstance(index, tuple) else [index]
+        rows.append(labels + list(values))
+    return "\n".join("\t".join(_excel_cell(value) for value in row) for row in rows)
+
+
+def copyable_table(data, *, static=False, **kwargs):
+    """Show a table with a neighboring button that copies Excel-ready cells."""
+    table_column, copy_column = st.columns([7, 1], gap="xsmall")
+    with table_column:
+        if static:
+            st.table(data)
+        else:
+            st.dataframe(data, **kwargs)
+
+    button_id = "copy_table_" + uuid4().hex
+    payload = json.dumps(_table_tsv(data), ensure_ascii=False).replace("<", "\\u003c")
+    with copy_column:
+        st.html(
+            f"""<button id="{button_id}" class="copy-table-button" type="button"
+                    title="Copia la tabella per Excel" aria-label="Copia la tabella per Excel">Copia</button>
+<script>
+(() => {{
+  const button = document.getElementById("{button_id}");
+  const content = {payload};
+  button.addEventListener("click", async () => {{
+    try {{
+      if (navigator.clipboard && window.isSecureContext) {{
+        await navigator.clipboard.writeText(content);
+      }} else {{
+        const field = document.createElement("textarea");
+        field.value = content;
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        document.body.appendChild(field);
+        field.select();
+        const copied = document.execCommand("copy");
+        field.remove();
+        if (!copied) throw new Error("Clipboard unavailable");
+      }}
+      button.textContent = "Copiato";
+      window.setTimeout(() => button.textContent = "Copia", 1800);
+    }} catch (error) {{
+      button.textContent = "Errore";
+      button.title = "Il browser ha bloccato l'accesso agli appunti";
+      window.setTimeout(() => button.textContent = "Copia", 2500);
+    }}
+  }});
+}})();
+</script>""",
+            width="stretch",
+            unsafe_allow_javascript=True,
+        )
 
 
 # ---------------------------------------------------------
@@ -496,7 +616,7 @@ if uploaded:
             "dati successivi alla stima dei pesi e include i costi."
         )
         if HAS_MATPLOTLIB:
-            st.table(
+            copyable_table(
                 strategy_matrix_df.style
                 .format("{:.1%}", subset=["Rendimento", "Volatilità"])
                 .format(
@@ -507,10 +627,11 @@ if uploaded:
                         "Diversif. Ratio",
                     ],
                 )
-                .map(style_signed_metric, subset=["Sharpe OOS netto"])
+                .map(style_signed_metric, subset=["Sharpe OOS netto"]),
+                static=True,
             )
         else:
-            st.table(
+            copyable_table(
                 strategy_matrix_df.style
                 .format("{:.1%}", subset=["Rendimento", "Volatilità"])
                 .format(
@@ -520,7 +641,8 @@ if uploaded:
                         "Sharpe OOS netto",
                         "Diversif. Ratio",
                     ],
-                )
+                ),
+                static=True,
             )
         if walk_error is not None:
             st.info(f"Sharpe OOS non disponibile: {walk_error}")
@@ -532,7 +654,7 @@ if uploaded:
             "stesso modo da Balanced. Se un corridoio non è fattibile, il "
             "calcolo si interrompe senza allentare i vincoli."
         )
-        st.dataframe(
+        copyable_table(
             active_corridors.style.format(
                 "{:.2%}",
                 subset=[
@@ -551,7 +673,7 @@ if uploaded:
                 "ma non sono forzati nei corridoi delle tre linee. Servono come "
                 "controllo indipendente, non come quarta o quinta proposta."
             )
-            st.dataframe(
+            copyable_table(
                 benchmark_df.style
                 .format("{:.1%}", subset=["Rendimento", "Volatilità"])
                 .format("{:.2f}", subset=["Sharpe", "Diversif. Ratio"]),
@@ -580,7 +702,7 @@ if uploaded:
             "Stress storico",
             "Peggior periodo",
         ]
-        st.dataframe(
+        copyable_table(
             risk_df.style
             .format("{:.2%}", subset=percent_columns)
             .format("{:.2f}", subset=["Sortino"]),
@@ -602,7 +724,7 @@ if uploaded:
                 ),
                 axis=1,
             )
-        st.dataframe(
+        copyable_table(
             bootstrap_display.set_index(["Linea", "Metrica"]),
             width="stretch",
         )
@@ -623,7 +745,7 @@ if uploaded:
             return [''] * len(s)
             
         styled_w = w_clean.style.format("{:.1%}").apply(highlight_cols, axis=0)
-        st.dataframe(styled_w, height=500, width="stretch")
+        copyable_table(styled_w, height=500, width="stretch")
 
         if benchmark_allocations:
             with st.expander("Pesi dei benchmark diagnostici", expanded=False):
@@ -631,7 +753,7 @@ if uploaded:
                     benchmark_allocations,
                     index=returns.columns,
                 )
-                st.dataframe(
+                copyable_table(
                     benchmark_weights_df.style.format("{:.1%}"),
                     height=500,
                     width="stretch",
@@ -651,7 +773,7 @@ if uploaded:
             "storiche: non rappresenta il look-through delle partecipazioni "
             "interne agli ETF."
         )
-        st.dataframe(
+        copyable_table(
             concentration_df.style
             .format(
                 "{:.2f}",
@@ -718,7 +840,7 @@ if uploaded:
         with c_kpi:
             st.markdown("#### Realized Results")
             if HAS_MATPLOTLIB:
-                st.table(
+                copyable_table(
                     perf_hist.style
                     .format(
                         "{:.2%}",
@@ -730,10 +852,11 @@ if uploaded:
                         ],
                     )
                     .format("{:.2f}", subset=["Sharpe", "Sortino"])
-                    .map(style_signed_metric, subset=["CAGR"])
+                    .map(style_signed_metric, subset=["CAGR"]),
+                    static=True,
                 )
             else:
-                st.table(perf_hist)
+                copyable_table(perf_hist, static=True)
             
         with c_plot:
             fig_nav = px.line(nav_df, title="Capital Growth (Base 100)")
@@ -747,7 +870,7 @@ if uploaded:
             "CVaR realizzato",
             "Costi cumulati",
         ]
-        st.dataframe(
+        copyable_table(
             walk_summary.style
             .format("{:.2%}", subset=walk_percent_columns)
             .format(
@@ -778,9 +901,9 @@ if uploaded:
             }
         )
         st.markdown("#### Turnover e impatto dei costi")
-        st.dataframe(cost_comparison.style.format("{:.2f}"), width="stretch")
+        copyable_table(cost_comparison.style.format("{:.2f}"), width="stretch")
         with st.expander("Dettaglio dei ribilanciamenti", expanded=False):
-            st.dataframe(
+            copyable_table(
                 rebalance_diagnostics.style
                 .format(
                     "{:.2%}",
@@ -823,7 +946,7 @@ if uploaded:
                 "a 0,70 nel campione caricato."
             )
         else:
-            st.dataframe(
+            copyable_table(
                 high_corr_pairs.style.format(
                     "{:.2f}",
                     subset=["Correlazione"],
@@ -856,9 +979,9 @@ if uploaded:
         
         with st.expander("📋 View Raw Data"):
             if HAS_MATPLOTLIB:
-                st.dataframe(corr_matrix.style.background_gradient(cmap="RdBu_r", vmin=-1, vmax=1).format("{:.2f}"), height=400, width="stretch")
+                copyable_table(corr_matrix.style.background_gradient(cmap="RdBu_r", vmin=-1, vmax=1).format("{:.2f}"), height=400, width="stretch")
             else:
-                st.dataframe(corr_matrix.style.format("{:.2f}"), height=400, width="stretch")
+                copyable_table(corr_matrix.style.format("{:.2f}"), height=400, width="stretch")
 
 else:
     st.info("👋 SYSTEM STANDBY. Initialize by uploading CSV data.")

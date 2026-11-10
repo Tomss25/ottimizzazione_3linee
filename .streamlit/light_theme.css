@@ -117,6 +117,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
 
 [data-testid="stMetricLabel"] { font-size: 0.875rem; }
 
+.copy-table-button {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 4px;
+  border: 1px solid var(--ds-control-border);
+  border-radius: 8px;
+  background: var(--ds-surface);
+  color: var(--ds-accent);
+  font-family: var(--ds-font);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.copy-table-button:hover {
+  background: var(--ds-accent-soft);
+  border-color: var(--ds-accent);
+}
+
 .stButton > button, .stDownloadButton > button,
 [data-testid="stFormSubmitButton"] > button {
   min-height: 44px;
