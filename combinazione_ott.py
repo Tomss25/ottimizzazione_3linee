@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+from pathlib import Path
 
 # Gestione sicura di Matplotlib per lo styling
 try:
@@ -20,113 +21,17 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CSS THEME: AI / CYBERPUNK
+# Tema visivo chiaro per i componenti Streamlit
 # ---------------------------------------------------------
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
-
-    .stApp { 
-        background-color: #F8FAFC; 
-        color: #0F172A;
-        font-family: 'Fira Sans', sans-serif; 
-    }
-    
-    label, li { color: #0F172A !important; }
-
-    [data-testid="stSidebar"] { 
-        background-color: #FFFFFF; 
-        border-right: 1px solid #DBEAFE; 
-    }
-    [data-testid="stSidebar"] p, [data-testid="stSidebar"] span, [data-testid="stSidebar"] label {
-        color: #334155 !important;
-    }
-    
-    [data-testid="stExpander"] summary p {
-        color: #1E3A8A !important;
-        font-weight: 700 !important;
-    }
-    
-    h1, h2, h3 { 
-        color: #0F172A !important; 
-        font-weight: 700; 
-        letter-spacing: 0.02em; 
-    }
-    h1 { font-family: 'Fira Code', monospace; font-size: 2.35rem; }
-    
-    div[data-testid="metric-container"] { 
-        background-color: #FFFFFF; 
-        border: 1px solid #DBEAFE; 
-        border-left: 4px solid #1E40AF; 
-        border-radius: 8px; 
-        padding: 16px; 
-        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06); 
-    }
-    [data-testid="stMetricLabel"] { font-family: 'Fira Code', monospace; font-size: 0.8rem; color: #475569 !important; }
-    [data-testid="stMetricValue"] { font-family: 'Fira Code', monospace; font-size: 1.8rem; color: #1E40AF !important; }
-
-    .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] > button { 
-        background: #1E40AF; 
-        color: #FFFFFF !important; 
-        border: 1px solid #1E40AF; 
-        border-radius: 7px; 
-        font-family: 'Fira Code', monospace;
-        font-weight: 600; 
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        min-height: 44px;
-        transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-    }
-    .stButton > button:hover, .stDownloadButton > button:hover, [data-testid="stFormSubmitButton"] > button:hover { 
-        background: #1D4ED8;
-        border-color: #1D4ED8; 
-        box-shadow: 0 3px 10px rgba(30, 64, 175, 0.2);
-        color: #FFFFFF !important;
-    }
-    .stButton > button p, .stDownloadButton > button p, [data-testid="stFormSubmitButton"] > button p { color: #FFFFFF !important; }
-
-    .stButton > button:focus-visible, .stDownloadButton > button:focus-visible, [data-testid="stFormSubmitButton"] > button:focus-visible { outline: 3px solid rgba(30, 64, 175, 0.25); outline-offset: 2px; }
-
-    [data-testid="stFileUploader"] { background-color: #FFFFFF; border: 1px solid #DBEAFE; border-radius: 8px; padding: 10px; }
-    [data-testid="stFileUploader"] section { background-color: #F8FAFC !important; border: 1px dashed #93C5FD !important; }
-    [data-testid="stFileUploader"] section > div > div > span, [data-testid="stFileUploader"] section > div > div > small { color: #475569 !important; }
-    [data-testid="stFileUploader"] button { background: #FFFFFF; color: #1E40AF !important; border: 1px solid #93C5FD; }
-
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { height: 45px; background-color: #FFFFFF; border-radius: 7px 7px 0 0; color: #64748B !important; font-family: 'Fira Code', monospace; border: 1px solid #E2E8F0; }
-    .stTabs [aria-selected="true"] { background-color: #EFF6FF; color: #1E40AF !important; border: 1px solid #BFDBFE; border-bottom: 3px solid #1E40AF; }
-    
-    [data-testid="stDataFrame"] { border: 1px solid #DBEAFE; border-radius: 8px; overflow: hidden; }
-    
-    /* MODIFICA: Intestazione tabellare evidenziata (Testo più grande, maiuscolo e bordo inferiore marcato) */
-    thead tr th { background-color: #EFF6FF !important; color: #1E3A8A !important; font-family: 'Fira Code', monospace; font-size: 0.95rem !important; text-transform: uppercase; border-bottom: 2px solid #93C5FD !important; }
-    
-    /* MODIFICA: Rimosso '!important' da background-color per permettere a Pandas di applicare i colori tenui */
-    tbody tr td { color: #0F172A; font-family: 'Fira Sans', sans-serif; background-color: #FFFFFF; }
-    
-    .stSelectbox > div > div, .stMultiSelect > div > div { background-color: #FFFFFF; color: #0F172A !important; border-color: #CBD5E1; }
-    [data-baseweb="tag"] { background-color: #DBEAFE !important; color: #1E3A8A !important; }
-    [data-baseweb="tag"] span { color: #1E3A8A !important; }
-    [data-baseweb="tag"] svg { fill: #1E40AF !important; }
-    div[data-baseweb="popover"], div[data-baseweb="menu"] { background-color: #FFFFFF !important; border: 1px solid #CBD5E1; }
-    div[data-baseweb="popover"] li, div[data-baseweb="menu"] li { background-color: #FFFFFF !important; color: #0F172A !important; }
-    div[data-baseweb="popover"] li:hover, div[data-baseweb="menu"] li:hover, div[data-baseweb="popover"] li[aria-selected="true"], div[data-baseweb="menu"] li[aria-selected="true"] { background-color: #EFF6FF !important; color: #1E40AF !important; }
-    [data-baseweb="select"] svg { fill: #1E40AF !important; }
-    [data-testid="stExpander"], [data-testid="stForm"] { background: #FFFFFF; border-color: #DBEAFE; border-radius: 8px; }
-    hr { border-color: #E2E8F0 !important; }
-    @media (prefers-reduced-motion: reduce) {
-        *, *::before, *::after {
-            scroll-behavior: auto !important;
-            transition-duration: 0.01ms !important;
-            animation-duration: 0.01ms !important;
-        }
-    }
-</style>
-""", unsafe_allow_html=True)
+st.markdown(
+    f"<style>{(Path(__file__).parent / '.streamlit' / 'light_theme.css').read_text(encoding='utf-8')}</style>",
+    unsafe_allow_html=True,
+)
 
 # Motore quantitativo verificabile separatamente dall'interfaccia Streamlit.
 from portfolio_engine import (
     FREQUENCY_LABELS,
+    VOLATILITY_LINE_GAP,
     bootstrap_portfolio_intervals,
     calculate_concentration_metrics,
     calculate_crisis_correlation,
@@ -137,8 +42,10 @@ from portfolio_engine import (
     detect_frequency,
     empirical_cvar,
     find_high_correlation_pairs,
+    minimum_feasible_volatility,
     normalize_price_frequency,
     optimize_basket,
+    optimize_ordered_lines,
     process_data_raw,
     run_walk_forward,
     validate_weight_bounds,
@@ -146,27 +53,37 @@ from portfolio_engine import (
 
 
 def style_chart(fig, title):
-    chart_colors = ['#1E40AF', '#D97706', '#0F766E', '#7C3AED', '#DC2626']
+    chart_colors = ['#087652', '#276E9F', '#7352AC', '#94651B', '#52695D', '#A24A64']
     fig.update_layout(
-        template="plotly_white", 
-        title=dict(text=f"<b>{title}</b>", font=dict(size=18, family="Fira Code, monospace", color="#1E3A8A"), x=0, y=0.96),
+        template="plotly_white",
+        title=dict(text=title, font=dict(size=18, family="Inter, Helvetica Neue, Arial, sans-serif", color="#17251C"), x=0, y=0.96),
         colorway=chart_colors, 
         margin=dict(l=20, r=20, t=50, b=20),
         hovermode="x unified",
         paper_bgcolor='rgba(0,0,0,0)', 
-        plot_bgcolor='#FFFFFF',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(family="Fira Code, monospace", size=11, color="#334155")),
-        font=dict(family="Fira Sans, sans-serif", color="#334155"),
-        xaxis=dict(showgrid=True, gridcolor='#E2E8F0', gridwidth=1, zerolinecolor='#CBD5E1'),
-        yaxis=dict(showgrid=True, gridcolor='#E2E8F0', gridwidth=1, zerolinecolor='#CBD5E1')
+        plot_bgcolor='rgba(0,0,0,0)',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(family="Inter, Helvetica Neue, Arial, sans-serif", size=11, color="#465C4E")),
+        font=dict(family="Inter, Helvetica Neue, Arial, sans-serif", color="#465C4E"),
+        xaxis=dict(showgrid=True, gridcolor='#CAD8CF', gridwidth=1, zerolinecolor='#CAD8CF'),
+        yaxis=dict(showgrid=True, gridcolor='#CAD8CF', gridwidth=1, zerolinecolor='#CAD8CF')
     )
     return fig
+
+
+def style_signed_metric(value):
+    """Colori tenui per gli esiti numerici, senza alterare il dato."""
+    if pd.isna(value):
+        return ""
+    if value < 0:
+        return "color: #B83859; background-color: #FBEFF2"
+    return "color: #096C4C; background-color: #E0F1E7"
+
 
 # ---------------------------------------------------------
 # INTERFACCIA
 # ---------------------------------------------------------
 st.title("📈 Portfolio Optimizer")
-st.markdown("<p style='color: #475569; margin-top: -15px; margin-bottom: 30px; font-family: Fira Code'>Constrained Asset Allocation & Risk Analysis System</p>", unsafe_allow_html=True)
+st.markdown("<p style='color: #465c4e; margin-top: -12px; margin-bottom: 32px; font-family: Inter, Helvetica Neue, Arial, sans-serif'>Constrained Asset Allocation & Risk Analysis System</p>", unsafe_allow_html=True)
 
 # Sidebar
 st.sidebar.header("⚙️ SYSTEM PARAMETERS")
@@ -232,15 +149,16 @@ st.sidebar.markdown("---")
 
 with st.sidebar.expander("📉 Parametri Volatilità", expanded=True):
     st.caption(
-        "I valori mostrati sono i vincoli effettivamente utilizzati. "
-        "Qualsiasi modifica sostituisce immediatamente il preset iniziale."
+        "Il minimo di Conservative è impostabile. I minimi delle linee "
+        "successive derivano dalla volatilità prevista della linea precedente "
+        "più 0,1 punti percentuali."
     )
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Minima**")
         min_cons = st.number_input("Conservativa min (%)", 0.0, 100.0, 0.0, 1.0)
-        min_bal = st.number_input("Balanced min (%)", 0.0, 100.0, 15.0, 1.0)
-        min_agg = st.number_input("Aggressive min (%)", 0.0, 100.0, 25.0, 1.0)
+        derived_minimums = st.empty()
+        derived_minimums.caption("Balanced e Aggressive: calcolo automatico dopo il caricamento.")
     with c2:
         st.markdown("**Massima**")
         max_cons = st.number_input("Conservativa max (%)", 0.0, 100.0, 15.0, 1.0)
@@ -252,11 +170,7 @@ with st.sidebar.expander("📉 Parametri Volatilità", expanded=True):
         "Balanced": max_bal / 100,
         "Aggressive": max_agg / 100,
     }
-    min_limits = {
-        "Conservative": min_cons / 100,
-        "Balanced": min_bal / 100,
-        "Aggressive": min_agg / 100,
-    }
+    min_limits = {"Conservative": min_cons / 100}
 
 # Main
 col_up, col_info = st.columns([1, 2])
@@ -347,6 +261,9 @@ if uploaded:
             mean_shrinkage,
             risk_free_rate,
         )
+        minimum_vol = minimum_feasible_volatility(
+            cov, min_weights, max_weights, freq
+        )
         causal_returns, _ = compute_causal_returns(selected_prices)
     except ValueError as e:
         st.error(f"Errore computazionale: {str(e)}"); st.stop()
@@ -358,14 +275,34 @@ if uploaded:
             f"{len(returns)} osservazioni · "
             f"{len(causal_returns)} osservazioni causali per il backtest"
         )
+        st.caption(
+            f"Volatilità annua minima ottenibile con i limiti sui pesi: "
+            f"{minimum_vol:.2%}"
+        )
         if len(returns) < 2 * freq:
             st.warning(
                 "Il campione comune copre meno di due anni equivalenti. "
                 "Le stime di rendimento atteso e i portafogli più aggressivi "
                 "possono essere instabili."
             )
+
+    infeasible_maximums = [
+        name for name, maximum in max_limits.items()
+        if minimum_vol > maximum + 1e-6
+    ]
+    if infeasible_maximums:
+        limits = ", ".join(
+            f"{name} (massimo {max_limits[name]:.1%})"
+            for name in infeasible_maximums
+        )
+        st.error(
+            f"Corridoi non raggiungibili: {limits}. Con i titoli e i limiti "
+            f"sui pesi attuali, la volatilità annua minima è "
+            f"{minimum_vol:.2%}. Rivedi i massimi, i titoli selezionati "
+            "o i limiti sui pesi."
+        )
+        st.stop()
         
-    allocations = {}
     metrics = []
     historical_risk = {}
     concentration_metrics = {}
@@ -379,25 +316,32 @@ if uploaded:
         ("HRP vincolato", "hrp"),
     ]
     
-    calc_success = True
-    
-    for name, method in strategies_config:
-        mx_vol = max_limits[name]
-        mn_vol = min_limits[name]
-        
+    try:
+        allocations, min_limits = optimize_ordered_lines(
+            mu_views.values,
+            cov,
+            strategies_config,
+            min_weights,
+            max_weights,
+            risk_free_rate,
+            max_limits,
+            min_limits["Conservative"],
+            freq,
+            returns,
+            gap=VOLATILITY_LINE_GAP,
+        )
+    except ValueError as error:
+        st.error(f"Impossibile costruire le tre linee ordinate: {error}")
+        st.stop()
+
+    derived_minimums.caption(
+        f"Balanced min: {min_limits['Balanced']:.2%} · "
+        f"Aggressive min: {min_limits['Aggressive']:.2%}"
+    )
+
+    for name, _ in strategies_config:
+        w = allocations[name]
         try:
-            w = optimize_basket(
-                mu_views.values,
-                cov,
-                method,
-                min_weights,
-                max_weights,
-                risk_free_rate,
-                max_vol=mx_vol,
-                min_vol=mn_vol,
-                frequency=freq,
-                returns_history=returns,
-            )
             m = calculate_metrics(
                 w,
                 mu_views.values,
@@ -405,7 +349,6 @@ if uploaded:
                 freq,
                 risk_free_rate,
             )
-            allocations[name] = w
             metrics.append([name] + list(m))
             historical_risk[name] = calculate_historical_risk_metrics(
                 w,
@@ -417,13 +360,9 @@ if uploaded:
                 w,
                 returns.corr(),
             )
-        except ValueError as e:
-            st.error(f"❌ FALLIMENTO STRATEGIA '{name}': {str(e)}")
-            calc_success = False
-            break
-
-    if not calc_success:
-        st.stop() 
+        except ValueError as error:
+            st.error(f"Errore nelle metriche della linea {name}: {error}")
+            st.stop()
     
     res_df = pd.DataFrame(metrics, columns=["Linea", "Rendimento", "Volatilità", "Sharpe", "Diversif. Ratio"]).set_index("Linea")
     benchmark_allocations = {}
@@ -504,6 +443,8 @@ if uploaded:
             freq,
             mean_shrinkage,
             transaction_cost_bps,
+            ordered_strategy_names=tuple(name for name, _ in strategies_config),
+            line_gap=VOLATILITY_LINE_GAP,
         )
     except ValueError as error:
         walk_error = str(error)
@@ -566,10 +507,7 @@ if uploaded:
                         "Diversif. Ratio",
                     ],
                 )
-                .background_gradient(
-                    cmap="viridis",
-                    subset=["Rendimento", "Sharpe OOS netto"],
-                )
+                .map(style_signed_metric, subset=["Sharpe OOS netto"])
             )
         else:
             st.table(
@@ -589,9 +527,10 @@ if uploaded:
 
         st.markdown("#### Corridoi di volatilità attivi")
         st.caption(
-            "Questi sono i valori correnti inseriti nella sidebar, non i preset "
-            "originari. Se un corridoio non è fattibile il calcolo si interrompe: "
-            "non viene applicato alcun limite alternativo."
+            "Il minimo di Balanced è la volatilità calcolata di Conservative "
+            "più 0,1 punti percentuali; quello di Aggressive deriva allo "
+            "stesso modo da Balanced. Se un corridoio non è fattibile, il "
+            "calcolo si interrompe senza allentare i vincoli."
         )
         st.dataframe(
             active_corridors.style.format(
@@ -625,8 +564,8 @@ if uploaded:
         
         st.download_button(label="📥 DOWNLOAD METRICS (CSV)", data=res_export.to_csv().encode('utf-8'), file_name='ai_metrics.csv', mime='text/csv')
 
-        fig_ef = px.scatter(res_df, x="Volatilità", y="Rendimento", color="Sharpe", size=[50]*len(res_df), text=res_df.index, color_continuous_scale="Viridis", title="Risk / Return Comparison")
-        fig_ef.update_traces(textposition='top center', textfont=dict(family="Fira Code, monospace", size=12, color="#334155"))
+        fig_ef = px.scatter(res_df, x="Volatilità", y="Rendimento", color="Sharpe", size=[50]*len(res_df), text=res_df.index, color_continuous_scale=[[0, "#A8D7B8"], [0.5, "#39A878"], [1, "#096C4C"]], title="Risk / Return Comparison")
+        fig_ef.update_traces(textposition=['top right', 'top center', 'top left'], textfont=dict(family="Inter, Helvetica Neue, Arial, sans-serif", size=12, color="#465C4E"))
         fig_ef = style_chart(fig_ef, "Risk / Return Comparison")
         fig_ef.update_layout(xaxis_tickformat=".1%", yaxis_tickformat=".1%")
         st.plotly_chart(fig_ef, width="stretch")
@@ -676,11 +615,11 @@ if uploaded:
         # MODIFICA: Funzione per applicare colori tenui e differenziati per ogni singola colonna
         def highlight_cols(s):
             if s.name == 'Conservative':
-                return ['background-color: rgba(30, 64, 175, 0.08)'] * len(s)
+                return ['background-color: rgba(8, 118, 82, 0.08)'] * len(s)
             elif s.name == 'Balanced':
-                return ['background-color: rgba(217, 119, 6, 0.08)'] * len(s)
+                return ['background-color: rgba(39, 110, 159, 0.08)'] * len(s)
             elif s.name == 'Aggressive':
-                return ['background-color: rgba(220, 38, 38, 0.08)'] * len(s)
+                return ['background-color: rgba(115, 82, 172, 0.08)'] * len(s)
             return [''] * len(s)
             
         styled_w = w_clean.style.format("{:.1%}").apply(highlight_cols, axis=0)
@@ -791,7 +730,7 @@ if uploaded:
                         ],
                     )
                     .format("{:.2f}", subset=["Sharpe", "Sortino"])
-                    .background_gradient(cmap="RdYlGn", subset=["CAGR"])
+                    .map(style_signed_metric, subset=["CAGR"])
                 )
             else:
                 st.table(perf_hist)
@@ -824,10 +763,11 @@ if uploaded:
         )
         st.caption(
             "Il rispetto del corridoio in questa tabella è valutato sulla "
-            "volatilità effettivamente realizzata fuori campione; può differire "
-            "dal vincolo ex ante, che resta sempre rispettato dall'ottimizzatore. "
-            "Per i benchmark il campo non è applicabile perché non viene imposto "
-            "un corridoio di linea."
+            "volatilità effettivamente realizzata fuori campione. Per Balanced "
+            "e Aggressive il campo non è applicabile: il minimo previsto cambia "
+            "a ogni ribilanciamento. La volatilità realizzata può non mantenere "
+            "l'ordine delle linee. Anche i benchmark non hanno un corridoio "
+            "di linea."
         )
 
         cost_comparison = pd.DataFrame(
@@ -845,11 +785,13 @@ if uploaded:
                 .format(
                     "{:.2%}",
                     subset=[
+                        "Volatilità minima",
                         "Volatilità prevista",
                         "Rendimento previsto",
                         "CVaR previsto",
                         "Costo",
                     ],
+                    na_rep="—",
                 )
                 .format("{:.2f}", subset=["Turnover"]),
                 width="stretch",
@@ -859,7 +801,7 @@ if uploaded:
         with st.expander("📉 Deep Drawdown Analysis", expanded=True):
             fig_dd = px.line(drawdown_df, title="Underwater Plot")
             fig_dd = style_chart(fig_dd, "Drawdown Depth")
-            fig_dd.update_traces(fill='tozeroy', line=dict(color='#DC2626')) 
+            fig_dd.update_traces(fill='tozeroy', line=dict(color='#B83859'))
             fig_dd.update_yaxes(tickformat=".1%", range=[None, 0.005]) 
             st.plotly_chart(fig_dd, width="stretch")
 
@@ -871,7 +813,7 @@ if uploaded:
         )
         
         fig_corr = px.imshow(corr_matrix, text_auto=".2f", aspect="auto", color_continuous_scale="RdBu_r", zmin=-1, zmax=1)
-        fig_corr.update_layout(title="Correlation Heatmap", template="plotly_white", height=700, font=dict(family="Fira Sans, sans-serif", color="#334155"))
+        fig_corr.update_layout(title="Correlation Heatmap", template="plotly_white", height=700, paper_bgcolor='rgba(0,0,0,0)', font=dict(family="Inter, Helvetica Neue, Arial, sans-serif", color="#465C4E"))
         st.plotly_chart(fig_corr, width="stretch")
 
         st.markdown("#### Coppie con elevata sovrapposizione statistica")
@@ -907,7 +849,8 @@ if uploaded:
             title="Historical Stress Correlation",
             template="plotly_white",
             height=700,
-            font=dict(family="Fira Sans, sans-serif", color="#334155"),
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Inter, Helvetica Neue, Arial, sans-serif", color="#465C4E"),
         )
         st.plotly_chart(fig_crisis, width="stretch")
         

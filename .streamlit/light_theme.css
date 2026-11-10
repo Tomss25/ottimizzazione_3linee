@@ -1,0 +1,296 @@
+/* Minimal Light, adapted to Streamlit's native controls. */
+:root {
+  color-scheme: light;
+  --ds-bg: #f4f7f5;
+  --ds-surface: #ffffff;
+  --ds-surface-raised: #eaf1ed;
+  --ds-sidebar: #edf3ef;
+  --ds-text: #17251c;
+  --ds-muted: #465c4e;
+  --ds-subtle: #53675a;
+  --ds-border: #cad8cf;
+  --ds-control-border: #718678;
+  --ds-accent: #096c4c;
+  --ds-accent-soft: #e0f1e7;
+  --ds-primary: #14271c;
+  --ds-primary-hover: #254632;
+  --ds-negative: #b83859;
+  --ds-focus: #096c4c26;
+  --ds-font: Inter, "Helvetica Neue", Arial, sans-serif;
+}
+
+html, body, .stApp {
+  font-family: var(--ds-font);
+  color: var(--ds-text);
+}
+
+.stApp {
+  background: radial-gradient(ellipse 70% 550px at 50% 0%, #a8d7b82b, transparent 90%), var(--ds-bg);
+}
+
+[data-testid="stHeader"] {
+  background: var(--ds-bg);
+  border-bottom: 1px solid var(--ds-border);
+}
+
+[data-testid="stMainBlockContainer"], .block-container {
+  max-width: 1700px;
+  padding-top: clamp(24px, 3vw, 48px);
+  padding-left: clamp(16px, 3vw, 48px);
+  padding-right: clamp(16px, 3vw, 48px);
+}
+
+[data-testid="stSidebar"] {
+  background: var(--ds-sidebar);
+  border-right: 1px solid var(--ds-border);
+}
+
+[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+  padding-top: 24px;
+}
+
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6 {
+  color: var(--ds-text) !important;
+  font-family: var(--ds-font) !important;
+  font-weight: 450 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.stApp h1 {
+  font-size: clamp(2rem, 3vw, 2.75rem) !important;
+  font-weight: 400 !important;
+  letter-spacing: -0.03em !important;
+  line-height: 1.18 !important;
+}
+
+.stApp h2 { font-size: clamp(1.5rem, 2.5vw, 2.25rem) !important; }
+.stApp h3 { font-size: clamp(1.25rem, 2vw, 1.75rem) !important; }
+
+.stApp [data-testid="stSidebar"] h2 {
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
+  line-height: 1.5 !important;
+}
+
+.stApp [data-testid="stMarkdownContainer"] p,
+.stApp [data-testid="stWidgetLabel"] p,
+.stApp [data-testid="stCaptionContainer"] p {
+  font-family: var(--ds-font) !important;
+}
+
+p, label, li, [data-testid="stCaptionContainer"] {
+  color: var(--ds-text);
+}
+
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p,
+[data-testid="stWidgetLabel"] p, [data-testid="stMetricLabel"] p {
+  color: var(--ds-muted);
+}
+
+button, input, select, textarea { font-family: var(--ds-font); }
+button { min-height: 44px; }
+
+button:focus-visible, input:focus-visible, textarea:focus-visible,
+[role="tab"]:focus-visible, [role="slider"]:focus-visible {
+  outline: 2px solid var(--ds-accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--ds-focus);
+}
+
+[data-testid="stMetric"] {
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: 12px;
+  padding: 20px 24px;
+  min-height: 112px;
+}
+
+[data-testid="stMetricValue"] {
+  color: var(--ds-text);
+  font-family: var(--ds-font);
+  font-size: clamp(1.5rem, 2vw, 2rem);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+}
+
+[data-testid="stMetricLabel"] { font-size: 0.875rem; }
+
+.stButton > button, .stDownloadButton > button,
+[data-testid="stFormSubmitButton"] > button {
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid var(--ds-primary);
+  border-radius: 999px;
+  background: var(--ds-primary);
+  color: #f8fbf9;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  box-shadow: none;
+  transition: background-color 160ms, border-color 160ms, color 160ms;
+}
+
+.stButton > button:hover, .stDownloadButton > button:hover,
+[data-testid="stFormSubmitButton"] > button:hover {
+  background: var(--ds-primary-hover);
+  border-color: var(--ds-primary-hover);
+  color: #f8fbf9;
+  box-shadow: none;
+}
+
+.stButton > button p, .stDownloadButton > button p,
+[data-testid="stFormSubmitButton"] > button p { color: inherit; }
+
+[data-testid="stFileUploader"], [data-testid="stExpander"],
+[data-testid="stForm"] {
+  border: 1px solid var(--ds-border);
+  border-radius: 12px;
+  background: var(--ds-surface);
+  box-shadow: none;
+}
+
+[data-testid="stFileUploader"] { padding: 12px; }
+[data-testid="stFileUploader"] section {
+  background: var(--ds-bg);
+  border: 1px dashed var(--ds-control-border);
+  border-radius: 8px;
+}
+
+[data-testid="stFileUploader"] button {
+  border: 1px solid var(--ds-control-border);
+  border-radius: 999px;
+  background: var(--ds-surface);
+  color: var(--ds-accent);
+}
+
+[data-testid="stExpander"] summary { min-height: 44px; }
+[data-testid="stExpander"] summary p {
+  color: var(--ds-text);
+  font-weight: 500;
+}
+
+[data-baseweb="select"] > div, [data-baseweb="input"] > div,
+[data-testid="stNumberInput"] input {
+  border-color: var(--ds-control-border);
+  border-radius: 8px;
+  background: var(--ds-surface);
+  color: var(--ds-text);
+}
+
+[data-baseweb="tag"] { background: var(--ds-accent-soft); color: var(--ds-accent); }
+[data-baseweb="tag"] span { color: var(--ds-accent); }
+
+[data-baseweb="popover"], [data-baseweb="menu"] {
+  border: 1px solid var(--ds-border);
+  background: var(--ds-surface);
+  color: var(--ds-text);
+}
+
+[data-baseweb="popover"] li:hover, [data-baseweb="menu"] li:hover,
+[data-baseweb="popover"] li[aria-selected="true"],
+[data-baseweb="menu"] li[aria-selected="true"] {
+  background: var(--ds-accent-soft);
+  color: var(--ds-accent);
+}
+
+[data-testid="stSlider"] [data-baseweb="slider"] [role="slider"] {
+  background: var(--ds-accent);
+  border-color: var(--ds-accent);
+}
+
+.stTabs [data-baseweb="tab-list"] {
+  gap: clamp(8px, 1.5vw, 24px);
+  border-bottom: 1px solid var(--ds-border);
+}
+
+.stTabs [data-baseweb="tab"] {
+  min-height: 44px;
+  height: auto;
+  padding: 10px 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ds-muted);
+  font-family: var(--ds-font);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+  border-bottom-color: var(--ds-accent);
+  background: transparent;
+  color: var(--ds-accent);
+}
+
+[data-testid="stDataFrame"], [data-testid="stTable"] {
+  border: 1px solid var(--ds-border);
+  border-radius: 12px;
+  background: var(--ds-surface);
+}
+
+[data-testid="stDataFrame"] { overflow: hidden; }
+[data-testid="stTable"] { overflow-x: auto; overflow-y: hidden; }
+
+[data-testid="stTable"] table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-testid="stTable"] th, [data-testid="stTable"] td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ds-border);
+  border-left: 0;
+  border-right: 0;
+  font-family: var(--ds-font);
+  font-size: 0.875rem;
+}
+
+[data-testid="stTable"] th {
+  background: var(--ds-surface-raised);
+  color: var(--ds-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-transform: none;
+}
+
+[data-testid="stTable"] td { color: var(--ds-text); }
+[data-testid="stTable"] th:not(:first-child),
+[data-testid="stTable"] td:not(:first-child) { text-align: right; }
+
+[data-testid="stAlert"] {
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+hr { border-color: var(--ds-border); }
+
+@media (max-width: 800px) {
+  [data-testid="stMainBlockContainer"], .block-container {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  [data-testid="stMetric"] { padding: 16px 20px; }
+}
+
+@media (max-width: 600px) {
+  [data-testid="stMainBlockContainer"], .block-container {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  [data-testid="stMetric"] { min-height: 0; }
+  .stTabs [data-baseweb="tab-list"] { overflow-x: auto; }
+  .stTabs [data-baseweb="tab"] { white-space: nowrap; }
+  [data-testid="stTable"] th, [data-testid="stTable"] td { padding: 10px 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .stButton > button, .stDownloadButton > button,
+  [data-testid="stFormSubmitButton"] > button { transition: none; }
+}

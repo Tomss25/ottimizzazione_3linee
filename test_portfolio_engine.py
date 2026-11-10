@@ -4,10 +4,14 @@ import numpy as np
 import pandas as pd
 
 from portfolio_engine import (
+    VOLATILITY_LINE_GAP,
     compute_causal_returns,
     empirical_cvar,
     estimate_mu_cov,
+    minimum_feasible_volatility,
     optimize_basket,
+    optimize_ordered_lines,
+    process_data_raw,
     run_walk_forward,
 )
 
@@ -23,6 +27,33 @@ class PortfolioEngineTests(unittest.TestCase):
             index=dates,
             columns=["A", "B", "C", "D"],
         )
+
+    def test_csv_dates_keep_iso_order_and_accept_day_first(self):
+        csv = (
+            "Data;A;B\n"
+            "2024-03-27;100,0;200,0\n"
+            "01/04/2024;101,0;201,0\n"
+            "2024-04-02;102,0;202,0\n"
+        )
+        prices, error = process_data_raw(csv.encode(), "prices.csv")
+        self.assertIsNone(error)
+        self.assertEqual(
+            list(prices.index),
+            list(pd.to_datetime(["2024-03-27", "2024-04-01", "2024-04-02"])),
+        )
+        self.assertAlmostEqual(prices.loc["2024-04-01", "A"], 101.0)
+
+    def test_infeasible_maximum_reports_attainable_minimum(self):
+        cov = np.diag([0.04, 0.09])
+        lower = np.zeros(2)
+        upper = np.array([0.60, 1.0])
+        minimum = minimum_feasible_volatility(cov, lower, upper, 1)
+        self.assertAlmostEqual(minimum, np.sqrt(0.0288), places=7)
+        with self.assertRaisesRegex(ValueError, "16.97%.*15.0%"):
+            optimize_basket(
+                np.zeros(2), cov, "gmv", lower, upper, 0.02,
+                max_vol=0.15, min_vol=0, frequency=1,
+            )
 
     def test_causal_returns_do_not_use_future_price(self):
         dates = pd.date_range("2024-01-01", periods=4, freq="D")
@@ -78,6 +109,81 @@ class PortfolioEngineTests(unittest.TestCase):
         volatility = np.sqrt(weights @ cov @ weights) * np.sqrt(252)
         self.assertGreaterEqual(volatility, 0.10 - 1e-6)
         self.assertLessEqual(volatility, 0.30 + 1e-6)
+
+    def test_ordered_lines_follow_calculated_previous_volatility(self):
+        mu, cov, _ = estimate_mu_cov(
+            self.returns, prior_strength=0.7, frequency=252, risk_free_rate=0.02
+        )
+        strategies = [
+            ("Conservative", "min_cvar"),
+            ("Balanced", "max_sharpe"),
+        ]
+        maximum = {"Conservative": 0.20, "Balanced": 0.30}
+        lower = np.zeros(4)
+        upper = np.full(4, 0.70)
+        allocations, minimum = optimize_ordered_lines(
+            mu.to_numpy(), cov, strategies, lower, upper, 0.02,
+            maximum, 0.0, 252, self.returns,
+        )
+        volatility = {
+            name: np.sqrt(weights @ cov @ weights) * np.sqrt(252)
+            for name, weights in allocations.items()
+        }
+        self.assertAlmostEqual(
+            minimum["Balanced"],
+            volatility["Conservative"] + VOLATILITY_LINE_GAP,
+        )
+        self.assertGreater(volatility["Balanced"], volatility["Conservative"])
+
+        impossible_maximum = maximum.copy()
+        impossible_maximum["Balanced"] = (
+            volatility["Conservative"] + VOLATILITY_LINE_GAP / 2
+        )
+        with self.assertRaisesRegex(ValueError, "minimo dinamico"):
+            optimize_ordered_lines(
+                mu.to_numpy(), cov, strategies, lower, upper, 0.02,
+                impossible_maximum, 0.0, 252, self.returns,
+            )
+
+    def test_walk_forward_recalculates_ordered_minimums_each_rebalance(self):
+        strategies = [
+            ("Conservative", "min_cvar"),
+            ("Balanced", "max_sharpe"),
+            ("Aggressive", "cvar_frontier"),
+        ]
+        maximum = {"Conservative": 0.20, "Balanced": 0.30, "Aggressive": 0.40}
+        _, _, summary, _, diagnostics = run_walk_forward(
+            self.returns,
+            strategies,
+            np.zeros(4),
+            np.full(4, 0.70),
+            0.02,
+            maximum,
+            {"Conservative": 0.0},
+            252,
+            0.70,
+            10,
+            ordered_strategy_names=tuple(name for name, _ in strategies),
+        )
+        for _, block in diagnostics.groupby("Data"):
+            lines = block.set_index("Linea")
+            conservative = lines.loc["Conservative", "Volatilità prevista"]
+            balanced = lines.loc["Balanced", "Volatilità prevista"]
+            aggressive = lines.loc["Aggressive", "Volatilità prevista"]
+            self.assertGreater(balanced, conservative)
+            self.assertGreater(aggressive, balanced)
+            self.assertAlmostEqual(
+                lines.loc["Balanced", "Volatilità minima"],
+                conservative + VOLATILITY_LINE_GAP,
+            )
+            self.assertAlmostEqual(
+                lines.loc["Aggressive", "Volatilità minima"],
+                balanced + VOLATILITY_LINE_GAP,
+            )
+        self.assertTrue(
+            summary.loc[["Balanced", "Aggressive"], "Corridoio realizzato rispettato"]
+            .isna().all()
+        )
 
     def test_hrp_and_gmv_benchmarks_respect_asset_bounds(self):
         mu, cov, _ = estimate_mu_cov(

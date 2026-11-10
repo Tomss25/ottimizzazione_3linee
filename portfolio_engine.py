@@ -15,6 +15,9 @@ FREQUENCY_LABELS = {
     12: "Mensile",
 }
 
+# Scarto minimo tra le volatilità annue previste delle tre linee (0,1 p.p.).
+VOLATILITY_LINE_GAP = 0.001
+
 
 def detect_frequency(df):
     if len(df) < 3:
@@ -82,6 +85,21 @@ def _interpolate_small_internal_gaps(
     return result
 
 
+def _parse_price_dates(values):
+    dates = pd.Index(values).astype(str).str.strip()
+    year_first = dates.str.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:\D|$)")
+    parsed = pd.Series(pd.NaT, index=np.arange(len(dates)), dtype="datetime64[ns]")
+    if year_first.any():
+        parsed.loc[year_first] = pd.to_datetime(
+            dates[year_first], format="mixed", dayfirst=False, errors="coerce"
+        ).to_numpy()
+    if (~year_first).any():
+        parsed.loc[~year_first] = pd.to_datetime(
+            dates[~year_first], format="mixed", dayfirst=True, errors="coerce"
+        ).to_numpy()
+    return pd.DatetimeIndex(parsed)
+
+
 def process_data_raw(file_bytes, filename):
     del filename
     for separator in (";", ",", "\t"):
@@ -92,12 +110,7 @@ def process_data_raw(file_bytes, filename):
                 index_col=0,
                 na_values=["undefined", "Undefined", "UNDEFINED"],
             )
-            df.index = pd.to_datetime(
-                df.index,
-                format="mixed",
-                dayfirst=True,
-                errors="coerce",
-            )
+            df.index = _parse_price_dates(df.index)
             df = df.loc[~df.index.isna()]
             if not df.index.is_unique:
                 df = df[~df.index.duplicated(keep="last")]
@@ -426,6 +439,42 @@ def _portfolio_volatility(weights, cov, frequency):
     return float(np.sqrt(max(weights @ cov @ weights, 0)) * np.sqrt(frequency))
 
 
+def minimum_feasible_volatility(cov, min_weights, max_weights, frequency):
+    """Minima volatilità annua con i soli vincoli sui pesi."""
+    lower, upper = validate_weight_bounds(min_weights, max_weights)
+    covariance = np.asarray(cov, dtype=float)
+    constraints = [{"type": "eq", "fun": lambda w: w.sum() - 1}]
+    starts = [
+        _feasible_start(lower, upper),
+        _feasible_start(lower, upper, np.argsort(np.diag(covariance))),
+        _feasible_start(lower, upper, np.argsort(np.diag(covariance))[::-1]),
+    ]
+    candidates = []
+    for start in starts:
+        result = minimize(
+            lambda w: float(w @ covariance @ w) * frequency,
+            start,
+            jac=lambda w: 2 * frequency * covariance @ w,
+            method="SLSQP",
+            bounds=tuple(zip(lower, upper)),
+            constraints=constraints,
+            options={"ftol": 1e-12, "maxiter": 3000},
+        )
+        if (
+            result.success
+            and abs(result.x.sum() - 1) <= 1e-6
+            and np.all(result.x >= lower - 1e-7)
+            and np.all(result.x <= upper + 1e-7)
+        ):
+            candidates.append(result.x)
+    if not candidates:
+        raise ValueError("Impossibile stimare la volatilità minima con i limiti sui pesi.")
+    return min(
+        _portfolio_volatility(weights, covariance, frequency)
+        for weights in candidates
+    )
+
+
 def _inverse_variance_weights(covariance):
     diagonal = np.clip(np.diag(covariance), 1e-16, None)
     inverse = 1.0 / diagonal
@@ -675,6 +724,14 @@ def optimize_basket(
         if returns_history is None
         else np.asarray(returns_history, dtype=float)
     )
+    if max_vol is not None:
+        minimum = minimum_feasible_volatility(cov, lower, upper, frequency)
+        if minimum > max_vol + 1e-6:
+            raise ValueError(
+                f"Volatilità minima ottenibile: {minimum:.2%}, "
+                f"superiore al limite massimo di {max_vol:.1%} "
+                "con i pesi correnti."
+            )
 
     if optimization_type == "hrp":
         weights = _project_to_volatility_corridor(
@@ -790,8 +847,9 @@ def optimize_basket(
             f"{max_vol if max_vol is not None else 100:.1%}"
         )
         raise ValueError(
-            "Nessun portafoglio soddisfa tutti i vincoli. "
-            f"Corridoio richiesto: {corridor}."
+            "Non è stata trovata una soluzione per il corridoio "
+            f"{corridor}. La sola volatilità minima non esclude "
+            "altri vincoli o difficoltà numeriche."
         )
     if (
         abs(weights.sum() - 1) > 1e-6
@@ -800,6 +858,70 @@ def optimize_basket(
     ):
         raise ValueError("La soluzione numerica viola i limiti sui pesi.")
     return weights
+
+
+def optimize_ordered_lines(
+    mu,
+    cov,
+    strategies_config,
+    min_weights,
+    max_weights,
+    risk_free_rate,
+    max_limits,
+    first_min_vol,
+    frequency,
+    returns_history,
+    gap=VOLATILITY_LINE_GAP,
+):
+    """Ottimizza le linee in sequenza con volatilità prevista crescente."""
+    if gap <= 1e-6:
+        raise ValueError("Lo scarto tra le linee deve superare la tolleranza numerica.")
+
+    allocations = {}
+    active_min_limits = {}
+    previous_volatility = None
+    for name, method in strategies_config:
+        minimum = (
+            first_min_vol
+            if previous_volatility is None
+            else previous_volatility + gap
+        )
+        maximum = max_limits[name]
+        if maximum is not None and minimum > maximum:
+            raise ValueError(
+                f"Linea {name}: minimo dinamico {minimum:.2%} superiore "
+                f"al massimo impostato {maximum:.2%}."
+            )
+        try:
+            weights = optimize_basket(
+                mu,
+                cov,
+                method,
+                min_weights,
+                max_weights,
+                risk_free_rate,
+                max_vol=maximum,
+                min_vol=minimum,
+                frequency=frequency,
+                returns_history=returns_history,
+            )
+        except ValueError as error:
+            raise ValueError(f"Linea {name}: {error}") from error
+
+        volatility = _portfolio_volatility(weights, cov, frequency)
+        if (
+            previous_volatility is not None
+            and volatility < previous_volatility + gap - 1e-6
+        ):
+            raise ValueError(
+                f"Linea {name}: l'ottimizzatore non rispetta lo scarto "
+                "minimo di volatilità."
+            )
+        allocations[name] = weights
+        active_min_limits[name] = minimum
+        previous_volatility = volatility
+
+    return allocations, active_min_limits
 
 
 def _moving_block_sample(values, block_size, rng):
@@ -917,7 +1039,17 @@ def run_walk_forward(
     frequency,
     mean_shrinkage,
     transaction_cost_bps,
+    ordered_strategy_names=(),
+    line_gap=VOLATILITY_LINE_GAP,
 ):
+    ordered_strategy_names = tuple(ordered_strategy_names)
+    ordered_config = [
+        strategy for strategy in strategies_config
+        if strategy[0] in ordered_strategy_names
+    ]
+    if tuple(name for name, _ in ordered_config) != ordered_strategy_names:
+        raise ValueError("Le linee ordinate devono comparire nell'ordine richiesto.")
+
     observation_count, asset_count = returns_simple.shape
     minimum_training = max(12, 2 * asset_count)
     test_start = max(minimum_training, int(observation_count * 0.70))
@@ -948,21 +1080,45 @@ def run_walk_forward(
         )
         test_dates.extend(test_block.index.tolist())
 
+        ordered_targets = {}
+        ordered_minimums = {}
+        if ordered_config:
+            try:
+                ordered_targets, ordered_minimums = optimize_ordered_lines(
+                    mu.values,
+                    cov,
+                    ordered_config,
+                    min_weights,
+                    max_weights,
+                    risk_free_rate,
+                    max_limits,
+                    min_limits[ordered_strategy_names[0]],
+                    frequency,
+                    training_returns,
+                    gap=line_gap,
+                )
+            except ValueError as error:
+                raise ValueError(
+                    f"Ribilanciamento {test_block.index[0].date()}: {error}"
+                ) from error
+
         for name, method in strategies_config:
             maximum_limit = max_limits.get(name)
-            minimum_limit = min_limits.get(name)
-            target_weights = optimize_basket(
-                mu.values,
-                cov,
-                method,
-                min_weights,
-                max_weights,
-                risk_free_rate,
-                max_vol=maximum_limit,
-                min_vol=minimum_limit,
-                frequency=frequency,
-                returns_history=training_returns,
-            )
+            minimum_limit = ordered_minimums.get(name, min_limits.get(name))
+            target_weights = ordered_targets.get(name)
+            if target_weights is None:
+                target_weights = optimize_basket(
+                    mu.values,
+                    cov,
+                    method,
+                    min_weights,
+                    max_weights,
+                    risk_free_rate,
+                    max_vol=maximum_limit,
+                    min_vol=minimum_limit,
+                    frequency=frequency,
+                    returns_history=training_returns,
+                )
             net, gross, ending_weights, turnover, cost = (
                 _apply_block_with_drift(
                     test_block,
@@ -981,6 +1137,7 @@ def run_walk_forward(
                     "Volatilità prevista": _portfolio_volatility(
                         target_weights, cov, frequency
                     ),
+                    "Volatilità minima": minimum_limit,
                     "Rendimento previsto": float(
                         target_weights @ mu.values * frequency
                     ),
@@ -1024,6 +1181,7 @@ def run_walk_forward(
                 "Volatilità prevista": _portfolio_volatility(
                     equal_weights, training_cov, frequency
                 ),
+                "Volatilità minima": np.nan,
                 "Rendimento previsto": float(
                     training_returns.mean().to_numpy()
                     @ equal_weights
@@ -1076,7 +1234,7 @@ def run_walk_forward(
                     (min_limit is None or realized_volatility >= min_limit)
                     and (max_limit is None or realized_volatility <= max_limit)
                 )
-                if name in min_limits
+                if name in min_limits and name not in ordered_strategy_names[1:]
                 else np.nan,
                 "Turnover cumulato": strategy_diag["Turnover"].sum(),
                 "Costi cumulati": strategy_diag["Costo"].sum(),
