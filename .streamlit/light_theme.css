@@ -1,15 +1,15 @@
 /* Minimal Light, adapted to Streamlit's native controls. */
 :root {
   color-scheme: light;
-  --ds-bg: #f4f7f5;
+  --ds-bg: #f5f6f8;
   --ds-surface: #ffffff;
-  --ds-surface-raised: #eaf1ed;
-  --ds-sidebar: #edf3ef;
-  --ds-text: #17251c;
-  --ds-muted: #465c4e;
-  --ds-subtle: #53675a;
-  --ds-border: #cad8cf;
-  --ds-control-border: #718678;
+  --ds-surface-raised: #eef0f2;
+  --ds-sidebar: #f0f1f3;
+  --ds-text: #20252b;
+  --ds-muted: #505b64;
+  --ds-subtle: #63707b;
+  --ds-border: #d4d8dd;
+  --ds-control-border: #89929b;
   --ds-accent: #096c4c;
   --ds-accent-soft: #e0f1e7;
   --ds-primary: #14271c;
@@ -25,7 +25,7 @@ html, body, .stApp {
 }
 
 .stApp {
-  background: radial-gradient(ellipse 70% 550px at 50% 0%, #a8d7b82b, transparent 90%), var(--ds-bg);
+  background: var(--ds-bg);
 }
 
 [data-testid="stHeader"] {

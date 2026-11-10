@@ -19,6 +19,9 @@ Web app Streamlit per costruire tre allocazioni long-only:
 - diagnostica della separazione tra linee su volatilità, CVaR, drawdown,
   distanza dei pesi e bootstrap, con avviso se Aggressive ha rendimento atteso
   non superiore a Balanced;
+- scenario facoltativo di correlazione di stress, attivabile con un interruttore
+  inizialmente spento, che influenza i pesi delle tre linee con intensità
+  decrescente (65%, 35%, 10%);
 - pulsante Copia accanto a ogni tabella per incollare le celle in Excel.
 
 I benchmark rispettano i limiti per singolo titolo ma non vengono forzati nei
@@ -35,6 +38,16 @@ Le volatilità realizzate fuori campione possono avere un ordine diverso.
 La validazione inizia dopo almeno metà delle osservazioni e presenta fino a
 tre finestre non sovrapposte con risultati netti dei costi. Il bootstrap
 della separazione usa pesi fissi e non misura l'incertezza della riottimizzazione.
+
+Quando lo stress dinamico è attivo, la correlazione dei periodi peggiori viene
+stimata con shrinkage usando solo i dati disponibili a ogni ribilanciamento.
+Entra nella scelta dei pesi, mentre i corridoi e l'ordine delle volatilità
+continuano a usare la stessa covarianza ordinaria per tutte le linee. Se il
+campione non basta per stimare lo scenario, l'app lo segnala invece di
+applicarlo parzialmente. Il confronto fuori campione con la versione senza
+stress si avvia separatamente dalla scheda Simulation e non viene usato per
+selezionare retroattivamente i pesi. Lo stress può migliorare o peggiorare
+Sharpe, CVaR e rendimento sui dati caricati.
 
 ## Installazione
 

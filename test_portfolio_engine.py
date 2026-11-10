@@ -8,6 +8,7 @@ from portfolio_engine import (
     compute_causal_returns,
     empirical_cvar,
     estimate_mu_cov,
+    estimate_stress_covariance,
     minimum_feasible_volatility,
     optimize_basket,
     optimize_ordered_lines,
@@ -304,6 +305,56 @@ class PortfolioEngineTests(unittest.TestCase):
                 10,
                 test_start_fraction=1.0,
             )
+
+    def test_stress_covariance_preserves_ordinary_volatilities_and_is_psd(self):
+        _, ordinary_cov, _ = estimate_mu_cov(
+            self.returns, 0.70, 252, 0.02
+        )
+        stress_cov, observations = estimate_stress_covariance(
+            self.returns, ordinary_cov
+        )
+        self.assertEqual(observations, 52)
+        np.testing.assert_allclose(np.diag(stress_cov), np.diag(ordinary_cov))
+        self.assertGreaterEqual(np.linalg.eigvalsh(stress_cov).min(), -1e-12)
+
+    def test_stress_changes_allocation_without_changing_common_volatility_order(self):
+        mu, ordinary_cov, _ = estimate_mu_cov(
+            self.returns, 0.70, 252, 0.02
+        )
+        stress_cov, _ = estimate_stress_covariance(
+            self.returns, ordinary_cov
+        )
+        strategies = [("Conservative", "min_cvar"), ("Balanced", "max_sharpe")]
+        args = (
+            mu.to_numpy(), ordinary_cov, strategies,
+            np.zeros(4), np.full(4, 0.70), 0.02,
+            {"Conservative": 0.20, "Balanced": 0.30}, 0.0,
+            252, self.returns,
+        )
+        baseline, _ = optimize_ordered_lines(*args)
+        stressed, minimums = optimize_ordered_lines(
+            *args, stress_cov=stress_cov
+        )
+        self.assertGreater(
+            np.abs(baseline["Conservative"] - stressed["Conservative"]).sum(),
+            0.01,
+        )
+        ordinary_vol = {
+            name: np.sqrt(weights @ ordinary_cov @ weights) * np.sqrt(252)
+            for name, weights in stressed.items()
+        }
+        self.assertGreater(ordinary_vol["Balanced"], ordinary_vol["Conservative"])
+        self.assertAlmostEqual(
+            minimums["Balanced"],
+            ordinary_vol["Conservative"] + VOLATILITY_LINE_GAP,
+        )
+        baseline_cvar = empirical_cvar(
+            self.returns.to_numpy() @ baseline["Conservative"]
+        )
+        stressed_cvar = empirical_cvar(
+            self.returns.to_numpy() @ stressed["Conservative"]
+        )
+        self.assertLessEqual(stressed_cvar, baseline_cvar * 1.02 + 1e-5)
 
 
 if __name__ == "__main__":

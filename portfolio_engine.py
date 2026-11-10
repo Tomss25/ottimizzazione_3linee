@@ -17,6 +17,11 @@ FREQUENCY_LABELS = {
 
 # Scarto minimo tra le volatilità annue previste delle tre linee (0,1 p.p.).
 VOLATILITY_LINE_GAP = 0.001
+STRESS_INTENSITY = {
+    "Conservative": 0.65,
+    "Balanced": 0.35,
+    "Aggressive": 0.10,
+}
 
 
 def detect_frequency(df):
@@ -400,6 +405,27 @@ def calculate_crisis_correlation(returns_simple, tail_share=0.20):
     return matrix, average, len(crisis_returns), float(threshold)
 
 
+def estimate_stress_covariance(returns_simple, base_cov, tail_share=0.20):
+    """Downside correlation with shrinkage, scaled by ordinary asset volatilities.
+
+    Only the supplied training sample is used. A somewhat wider downside set
+    is permitted for short histories, up to 40% of observations. If even that
+    cannot support the estimate, stress allocation is unavailable.
+    """
+    values = np.asarray(returns_simple, dtype=float)
+    count, asset_count = values.shape
+    needed = max(10, 2 * asset_count, int(np.ceil(tail_share * count)))
+    if needed > int(np.floor(0.40 * count)):
+        return None, 0
+    stress = values[np.argsort(values.mean(axis=1))[:needed]]
+    estimated_cov = LedoitWolf().fit(stress).covariance_
+    estimated_std = np.sqrt(np.clip(np.diag(estimated_cov), 1e-16, None))
+    stress_correlation = estimated_cov / np.outer(estimated_std, estimated_std)
+    base_std = np.sqrt(np.clip(np.diag(np.asarray(base_cov, dtype=float)), 0, None))
+    stress_cov = np.outer(base_std, base_std) * stress_correlation
+    return (stress_cov + stress_cov.T) / 2, needed
+
+
 def validate_weight_bounds(min_weights, max_weights):
     lower = np.asarray(min_weights, dtype=float)
     upper = np.asarray(max_weights, dtype=float)
@@ -580,6 +606,58 @@ def _solve_min_cvar_lp(
     return result.x[:asset_count]
 
 
+def _refine_min_cvar_for_stress(
+    target,
+    returns_history,
+    risk_cov,
+    ordinary_cov,
+    lower,
+    upper,
+    frequency,
+    min_vol,
+    max_vol,
+    stress_strength,
+):
+    """Reduce blended downside variance while nearly preserving minimum CVaR."""
+    base_cvar = empirical_cvar(returns_history @ target)
+    cvar_budget = base_cvar * (1 + 0.03 * stress_strength) + 1e-6
+    constraints = [
+        {"type": "eq", "fun": lambda w: w.sum() - 1},
+        {
+            "type": "ineq",
+            "fun": lambda w: cvar_budget - empirical_cvar(returns_history @ w),
+        },
+    ]
+    if min_vol is not None:
+        constraints.append({
+            "type": "ineq",
+            "fun": lambda w: _portfolio_volatility(w, ordinary_cov, frequency) - min_vol,
+        })
+    if max_vol is not None:
+        constraints.append({
+            "type": "ineq",
+            "fun": lambda w: max_vol - _portfolio_volatility(w, ordinary_cov, frequency),
+        })
+    result = minimize(
+        lambda w: float(w @ risk_cov @ w),
+        target,
+        jac=lambda w: 2 * risk_cov @ w,
+        method="SLSQP",
+        bounds=tuple(zip(lower, upper)),
+        constraints=constraints,
+        options={"ftol": 1e-10, "maxiter": 500},
+    )
+    if (
+        result.success
+        and empirical_cvar(returns_history @ result.x) <= cvar_budget + 1e-7
+        and _within_corridor(result.x, ordinary_cov, frequency, min_vol, max_vol)
+        and float(result.x @ risk_cov @ result.x)
+        < float(target @ risk_cov @ target) - 1e-12
+    ):
+        return result.x
+    return target
+
+
 def _project_to_volatility_corridor(
     target,
     lower,
@@ -648,6 +726,8 @@ def _aggressive_frontier_weights(
     frequency,
     min_vol,
     max_vol,
+    risk_cov=None,
+    stress_strength=0.0,
 ):
     mu = np.asarray(mu, dtype=float)
     minimum_return = float(mu @ _feasible_start(lower, upper, np.argsort(mu)))
@@ -685,21 +765,29 @@ def _aggressive_frontier_weights(
             np.asarray(returns_history, dtype=float) @ weights
         ) * np.sqrt(frequency)
         concentration = float(np.square(weights).sum())
-        candidates.append((weights, expected_return, cvar, concentration))
+        stress_volatility = (
+            _portfolio_volatility(weights, risk_cov, frequency)
+            if risk_cov is not None else 0.0
+        )
+        candidates.append((weights, expected_return, cvar, concentration, stress_volatility))
     if not candidates:
         return None
     returns = np.array([item[1] for item in candidates])
     cvars = np.array([item[2] for item in candidates])
     concentrations = np.array([item[3] for item in candidates])
+    stress_volatilities = np.array([item[4] for item in candidates])
     return_scale = max(np.ptp(returns), 1e-12)
     cvar_scale = max(np.ptp(cvars), 1e-12)
     concentration_scale = max(np.ptp(concentrations), 1e-12)
+    stress_scale = max(np.ptp(stress_volatilities), 1e-12)
     # Punto di ginocchio della frontiera: rendimento marginale meno aumento
     # del rischio di coda, con una penalità contenuta per la concentrazione.
     score = (
         (returns - returns.min()) / return_scale
         - (cvars - cvars.min()) / cvar_scale
         - 0.10 * (concentrations - concentrations.min()) / concentration_scale
+        - 0.10 * stress_strength
+        * (stress_volatilities - stress_volatilities.min()) / stress_scale
     )
     return candidates[int(np.argmax(score))][0]
 
@@ -715,8 +803,14 @@ def optimize_basket(
     min_vol=None,
     frequency=12,
     returns_history=None,
+    risk_cov=None,
+    stress_strength=0.0,
 ):
     lower, upper = validate_weight_bounds(min_weights, max_weights)
+    effective_risk_cov = (
+        np.asarray(cov, dtype=float)
+        if risk_cov is None else np.asarray(risk_cov, dtype=float)
+    )
     if min_vol is not None and max_vol is not None and min_vol > max_vol:
         raise ValueError("La volatilità minima supera la volatilità massima.")
     returns_array = (
@@ -759,6 +853,11 @@ def optimize_basket(
                 min_vol,
                 max_vol,
             )
+        if weights is not None and risk_cov is not None and stress_strength > 0:
+            weights = _refine_min_cvar_for_stress(
+                weights, returns_array, effective_risk_cov, cov,
+                lower, upper, frequency, min_vol, max_vol, stress_strength,
+            )
     elif optimization_type == "cvar_frontier":
         if returns_array is None:
             raise ValueError("Lo storico è necessario per la frontiera CVaR.")
@@ -771,6 +870,8 @@ def optimize_basket(
             frequency,
             min_vol,
             max_vol,
+            risk_cov=risk_cov,
+            stress_strength=stress_strength,
         )
     else:
         constraints = [{"type": "eq", "fun": lambda w: w.sum() - 1}]
@@ -799,13 +900,13 @@ def optimize_basket(
         def objective(w):
             concentration_penalty = 0.03 * np.square(w).sum()
             if optimization_type == "max_sharpe":
-                volatility = _portfolio_volatility(w, cov, frequency)
+                volatility = _portfolio_volatility(w, effective_risk_cov, frequency)
                 return -(
                     (expected_return(w) - risk_free_rate)
                     / max(volatility, 1e-12)
                 ) + concentration_penalty
             if optimization_type == "min_vol":
-                return float(w @ cov @ w) + concentration_penalty
+                return float(w @ effective_risk_cov @ w) + concentration_penalty
             if optimization_type == "gmv":
                 return float(w @ cov @ w)
             if optimization_type == "max_return":
@@ -872,6 +973,7 @@ def optimize_ordered_lines(
     frequency,
     returns_history,
     gap=VOLATILITY_LINE_GAP,
+    stress_cov=None,
 ):
     """Ottimizza le linee in sequenza con volatilità prevista crescente."""
     if gap <= 1e-6:
@@ -893,6 +995,14 @@ def optimize_ordered_lines(
                 f"al massimo impostato {maximum:.2%}."
             )
         try:
+            stress_strength = (
+                STRESS_INTENSITY.get(name, 0.0)
+                if stress_cov is not None else 0.0
+            )
+            risk_cov = (
+                (1 - stress_strength) * cov + stress_strength * stress_cov
+                if stress_strength > 0 else None
+            )
             weights = optimize_basket(
                 mu,
                 cov,
@@ -904,6 +1014,8 @@ def optimize_ordered_lines(
                 min_vol=minimum,
                 frequency=frequency,
                 returns_history=returns_history,
+                risk_cov=risk_cov,
+                stress_strength=stress_strength,
             )
         except ValueError as error:
             raise ValueError(f"Linea {name}: {error}") from error
@@ -1042,6 +1154,7 @@ def run_walk_forward(
     ordered_strategy_names=(),
     line_gap=VOLATILITY_LINE_GAP,
     test_start_fraction=0.70,
+    use_stress=False,
 ):
     ordered_strategy_names = tuple(ordered_strategy_names)
     ordered_config = [
@@ -1081,6 +1194,15 @@ def run_walk_forward(
             frequency,
             risk_free_rate,
         )
+        stress_cov, stress_observations = (
+            estimate_stress_covariance(training_returns, cov)
+            if use_stress else (None, 0)
+        )
+        if use_stress and stress_cov is None:
+            raise ValueError(
+                f"Ribilanciamento {test_block.index[0].date()}: "
+                "storico insufficiente per stimare la correlazione di stress."
+            )
         test_dates.extend(test_block.index.tolist())
 
         ordered_targets = {}
@@ -1099,6 +1221,7 @@ def run_walk_forward(
                     frequency,
                     training_returns,
                     gap=line_gap,
+                    stress_cov=stress_cov,
                 )
             except ValueError as error:
                 raise ValueError(
@@ -1149,6 +1272,15 @@ def run_walk_forward(
                     ),
                     "Turnover": turnover,
                     "Costo": cost,
+                    "Intensità stress": (
+                        STRESS_INTENSITY.get(name, 0.0)
+                        if stress_cov is not None else 0.0
+                    ),
+                    "Osservazioni stress": stress_observations,
+                    "Volatilità scenario stress": (
+                        _portfolio_volatility(target_weights, stress_cov, frequency)
+                        if stress_cov is not None else np.nan
+                    ),
                 }
             )
 

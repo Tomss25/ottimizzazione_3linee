@@ -35,6 +35,7 @@ st.markdown(
 # Motore quantitativo verificabile separatamente dall'interfaccia Streamlit.
 from portfolio_engine import (
     FREQUENCY_LABELS,
+    STRESS_INTENSITY,
     VOLATILITY_LINE_GAP,
     bootstrap_portfolio_intervals,
     calculate_concentration_metrics,
@@ -45,6 +46,7 @@ from portfolio_engine import (
     compute_core_stats,
     detect_frequency,
     empirical_cvar,
+    estimate_stress_covariance,
     find_high_correlation_pairs,
     minimum_feasible_volatility,
     normalize_price_frequency,
@@ -55,6 +57,8 @@ from portfolio_engine import (
     summarize_validation_windows,
     validate_weight_bounds,
 )
+
+cached_run_walk_forward = st.cache_data(show_spinner=False)(run_walk_forward)
 
 
 def style_chart(fig, title):
@@ -288,6 +292,17 @@ with st.sidebar.expander("📉 Parametri Volatilità", expanded=True):
         ),
     )
     line_gap = line_gap_pp / 100
+    use_stress = st.toggle(
+        "Attiva stress dinamico nell'allocazione",
+        value=False,
+        key="dynamic_stress_enabled",
+        help=(
+            "Combina la covarianza ordinaria con la correlazione stimata "
+            "nei periodi peggiori. L'intensità è 65% per Conservative, "
+            "35% per Balanced e 10% per Aggressive. I corridoi e le "
+            "volatilità mostrate restano misurati sulla stessa matrice ordinaria."
+        ),
+    )
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Minima**")
@@ -399,6 +414,16 @@ if uploaded:
         minimum_vol = minimum_feasible_volatility(
             cov, min_weights, max_weights, freq
         )
+        stress_cov, stress_observations = (
+            estimate_stress_covariance(returns, cov)
+            if use_stress else (None, 0)
+        )
+        if use_stress and stress_cov is None:
+            raise ValueError(
+                "Storico insufficiente per stimare la correlazione di stress "
+                "con almeno 10 osservazioni e 2 per titolo nel gruppo peggiore. "
+                "Carica uno storico più lungo o disattiva lo scenario di stress."
+            )
         causal_returns, _ = compute_causal_returns(selected_prices)
     except ValueError as e:
         st.error(f"Errore computazionale: {str(e)}"); st.stop()
@@ -414,6 +439,12 @@ if uploaded:
             f"Volatilità annua minima ottenibile con i limiti sui pesi: "
             f"{minimum_vol:.2%}"
         )
+        if use_stress:
+            st.caption(
+                f"Scenario di stress usato nei pesi: {stress_observations} "
+                "periodi peggiori del paniere equiponderato; intensità "
+                "65% Conservative, 35% Balanced, 10% Aggressive."
+            )
         if len(returns) < 2 * freq:
             st.warning(
                 "Il campione comune copre meno di due anni equivalenti. "
@@ -464,10 +495,31 @@ if uploaded:
             freq,
             returns,
             gap=line_gap,
+            stress_cov=stress_cov,
         )
     except ValueError as error:
         st.error(f"Impossibile costruire le tre linee ordinate: {error}")
         st.stop()
+
+    baseline_allocations = None
+    baseline_allocation_error = None
+    if use_stress:
+        try:
+            baseline_allocations, _ = optimize_ordered_lines(
+                mu_views.values,
+                cov,
+                strategies_config,
+                min_weights,
+                max_weights,
+                risk_free_rate,
+                max_limits,
+                min_cons / 100,
+                freq,
+                returns,
+                gap=line_gap,
+            )
+        except ValueError as error:
+            baseline_allocation_error = str(error)
 
     derived_minimums.caption(
         f"Balanced min: {min_limits['Balanced']:.2%} · "
@@ -567,7 +619,7 @@ if uploaded:
     walk_result = None
     walk_error = None
     try:
-        walk_result = run_walk_forward(
+        walk_result = cached_run_walk_forward(
             causal_returns,
             strategies_config + available_benchmark_strategies,
             min_weights,
@@ -581,6 +633,7 @@ if uploaded:
             ordered_strategy_names=tuple(name for name, _ in strategies_config),
             line_gap=line_gap,
             test_start_fraction=0.50,
+            use_stress=use_stress,
         )
     except ValueError as error:
         walk_error = str(error)
@@ -625,12 +678,20 @@ if uploaded:
         st.markdown("#### Strategy Matrix")
         st.caption(
             "I rendimenti attesi sono medie winsorizzate con extra-rendimento "
-            "ridotto verso zero. Conservative minimizza il CVaR con la "
-            "formulazione scenario-based; Aggressive seleziona il punto di "
-            "ginocchio della frontiera rendimento–CVaR. Tutte le linee rispettano "
+            "ridotto verso zero. Conservative parte dal minimo CVaR; "
+            "Aggressive seleziona il punto di ginocchio della frontiera "
+            "rendimento–CVaR. Tutte le linee rispettano "
             "i corridoi di volatilità correnti. Lo Sharpe OOS netto usa soltanto "
             "dati successivi alla stima dei pesi e include i costi."
         )
+        if use_stress:
+            st.caption(
+                "Con lo stress attivo, Conservative riduce anche la varianza "
+                "della matrice mista entro un aumento massimo del 2% circa "
+                "del CVaR minimo; Balanced usa la matrice mista nello Sharpe "
+                "da ottimizzare; Aggressive ne considera il rischio nella "
+                "scelta sulla frontiera."
+            )
         if HAS_MATPLOTLIB:
             copyable_table(
                 strategy_matrix_df.style
@@ -681,6 +742,52 @@ if uploaded:
             ),
             width="stretch",
         )
+
+        if use_stress:
+            st.markdown("#### Effetto delle correlazioni di stress sui pesi")
+            st.caption(
+                "La correlazione dei periodi peggiori è stimata con shrinkage "
+                "e combinata con la matrice ordinaria nella scelta dei pesi. "
+                "La quota di stress è maggiore per Conservative e minore "
+                "per Aggressive. Le volatilità ordinarie usano per tutte "
+                "le linee la stessa matrice."
+            )
+            if baseline_allocations is None:
+                st.warning(
+                    "Confronto dei pesi senza stress non disponibile: "
+                    f"{baseline_allocation_error}"
+                )
+            else:
+                impact_rows = []
+                for name, _ in strategies_config:
+                    base_weights = baseline_allocations[name]
+                    stressed_weights = allocations[name]
+                    impact_rows.append({
+                        "Linea": name,
+                        "Intensità stress": STRESS_INTENSITY[name],
+                        "Distanza pesi": 0.5 * np.abs(
+                            stressed_weights - base_weights
+                        ).sum(),
+                        "Vol. ordinaria senza stress": np.sqrt(
+                            base_weights @ cov @ base_weights * freq
+                        ),
+                        "Vol. ordinaria con stress": np.sqrt(
+                            stressed_weights @ cov @ stressed_weights * freq
+                        ),
+                        "Vol. scenario senza stress": np.sqrt(
+                            base_weights @ stress_cov @ base_weights * freq
+                        ),
+                        "Vol. scenario con stress": np.sqrt(
+                            stressed_weights @ stress_cov @ stressed_weights * freq
+                        ),
+                    })
+                impact_df = pd.DataFrame(impact_rows).set_index("Linea")
+                copyable_table(impact_df.style.format("{:.2%}"), width="stretch")
+                if (impact_df["Distanza pesi"] < 1e-6).all():
+                    st.info(
+                        "Su questi dati lo scenario è entrato nell'ottimizzazione "
+                        "ma non ha cambiato i pesi in misura apprezzabile."
+                    )
         
         if not benchmark_df.empty:
             st.markdown("#### Benchmark diagnostici")
@@ -1009,6 +1116,95 @@ if uploaded:
             width="stretch",
         )
 
+        if use_stress:
+            st.markdown("#### Stress contro allocazione ordinaria fuori campione")
+            compare_baseline = st.toggle(
+                "Calcola il confronto fuori campione senza stress",
+                value=False,
+            )
+            baseline_walk_result = None
+            baseline_walk_error = None
+            if compare_baseline:
+                try:
+                    with st.spinner("Calcolo il confronto senza stress..."):
+                        baseline_walk_result = cached_run_walk_forward(
+                            causal_returns,
+                            strategies_config + available_benchmark_strategies,
+                            min_weights,
+                            max_weights,
+                            risk_free_rate,
+                            max_limits,
+                            {"Conservative": min_cons / 100},
+                            freq,
+                            mean_shrinkage,
+                            transaction_cost_bps,
+                            ordered_strategy_names=tuple(
+                                name for name, _ in strategies_config
+                            ),
+                            line_gap=line_gap,
+                            test_start_fraction=0.50,
+                            use_stress=False,
+                        )
+                except ValueError as error:
+                    baseline_walk_error = str(error)
+            if compare_baseline and baseline_walk_result is None:
+                st.warning(
+                    "Confronto fuori campione senza stress non disponibile: "
+                    f"{baseline_walk_error}"
+                )
+            elif baseline_walk_result is not None:
+                baseline_nav, _, baseline_summary, _, _ = baseline_walk_result
+                comparison_rows = []
+                for name, _ in strategies_config:
+                    comparison_rows.append({
+                        "Linea": name,
+                        "Sharpe netto con stress": walk_summary.loc[
+                            name, "Sharpe realizzato"
+                        ],
+                        "Sharpe netto senza stress": baseline_summary.loc[
+                            name, "Sharpe realizzato"
+                        ],
+                        "CVaR con stress": walk_summary.loc[
+                            name, "CVaR realizzato"
+                        ],
+                        "CVaR senza stress": baseline_summary.loc[
+                            name, "CVaR realizzato"
+                        ],
+                        "NAV finale con stress": nav_df[name].iloc[-1],
+                        "NAV finale senza stress": baseline_nav[name].iloc[-1],
+                    })
+                stress_comparison = pd.DataFrame(comparison_rows).set_index("Linea")
+                copyable_table(
+                    stress_comparison.style
+                    .format("{:.2f}", subset=[
+                        "Sharpe netto con stress", "Sharpe netto senza stress",
+                        "NAV finale con stress", "NAV finale senza stress",
+                    ])
+                    .format("{:.2%}", subset=[
+                        "CVaR con stress", "CVaR senza stress",
+                    ]),
+                    width="stretch",
+                )
+                st.caption(
+                    "Confronto sulla stessa sequenza fuori campione e con gli "
+                    "stessi costi. Sharpe più alto e CVaR più basso sono "
+                    "preferibili, ma i risultati storici non dimostrano un "
+                    "vantaggio futuro. Il confronto non è usato per "
+                    "selezionare i pesi, così non introduce dati futuri "
+                    "nell'ottimizzazione."
+                )
+                weaker = stress_comparison.index[
+                    (stress_comparison["Sharpe netto con stress"]
+                     <= stress_comparison["Sharpe netto senza stress"])
+                    & (stress_comparison["CVaR con stress"]
+                       >= stress_comparison["CVaR senza stress"])
+                ].tolist()
+                if weaker:
+                    st.warning(
+                        "Nel campione fuori campione lo stress non migliora "
+                        "né Sharpe netto né CVaR per: " + ", ".join(weaker)
+                    )
+
         cost_comparison = pd.DataFrame(
             {
                 "NAV lorda": gross_nav_df.iloc[-1],
@@ -1074,7 +1270,8 @@ if uploaded:
         st.caption(
             f"Peggior 20% delle osservazioni del paniere equal-weight "
             f"({crisis_observations} periodi; soglia {crisis_threshold:.2%}). "
-            f"Correlazione media tra titoli: {crisis_average:.2f}."
+            f"Correlazione media tra titoli: {crisis_average:.2f}. "
+            "Questa matrice non filtrata è descrittiva."
         )
         fig_crisis = px.imshow(
             crisis_corr,
@@ -1092,6 +1289,43 @@ if uploaded:
             font=dict(family="Inter, Helvetica Neue, Arial, sans-serif", color="#465C4E"),
         )
         st.plotly_chart(fig_crisis, width="stretch")
+
+        if use_stress:
+            st.markdown("#### Matrice dinamica usata nell'allocazione")
+            st.caption(
+                f"Stimata su {stress_observations} periodi negativi con "
+                "shrinkage; durante il walk-forward viene ricalcolata "
+                "esclusivamente sui dati già osservati. Le volatilità "
+                "dei singoli titoli restano quelle della matrice ordinaria."
+            )
+            base_std = np.sqrt(np.clip(np.diag(cov), 1e-16, None))
+            applied_stress_corr = pd.DataFrame(
+                stress_cov / np.outer(base_std, base_std),
+                index=returns.columns,
+                columns=returns.columns,
+            )
+            fig_applied_stress = px.imshow(
+                applied_stress_corr,
+                text_auto=".2f",
+                aspect="auto",
+                color_continuous_scale="RdBu_r",
+                zmin=-1,
+                zmax=1,
+            )
+            fig_applied_stress.update_layout(
+                title="Stress Correlation Used for Allocation",
+                template="plotly_white",
+                height=700,
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(family="Inter, Helvetica Neue, Arial, sans-serif", color="#465C4E"),
+            )
+            st.plotly_chart(fig_applied_stress, width="stretch")
+            with st.expander("Valori della matrice dinamica", expanded=False):
+                copyable_table(
+                    applied_stress_corr.style.format("{:.2f}"),
+                    height=400,
+                    width="stretch",
+                )
         
         with st.expander("📋 View Raw Data"):
             if HAS_MATPLOTLIB:
