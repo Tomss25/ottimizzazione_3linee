@@ -52,6 +52,7 @@ from portfolio_engine import (
     optimize_ordered_lines,
     process_data_raw,
     run_walk_forward,
+    summarize_validation_windows,
     validate_weight_bounds,
 )
 
@@ -271,8 +272,22 @@ with st.sidebar.expander("📉 Parametri Volatilità", expanded=True):
     st.caption(
         "Il minimo di Conservative è impostabile. I minimi delle linee "
         "successive derivano dalla volatilità prevista della linea precedente "
-        "più 0,1 punti percentuali."
+        "più la distanza minima scelta qui sotto."
     )
+    line_gap_pp = st.number_input(
+        "Distanza minima tra linee (punti percentuali)",
+        min_value=VOLATILITY_LINE_GAP * 100,
+        max_value=10.0,
+        value=0.5,
+        step=0.1,
+        format="%.1f",
+        help=(
+            "La volatilità minima di Balanced e Aggressive segue quella "
+            "calcolata della linea precedente più questo scarto. "
+            "Un valore più alto può rendere impossibile costruire tre linee."
+        ),
+    )
+    line_gap = line_gap_pp / 100
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Minima**")
@@ -448,7 +463,7 @@ if uploaded:
             min_limits["Conservative"],
             freq,
             returns,
-            gap=VOLATILITY_LINE_GAP,
+            gap=line_gap,
         )
     except ValueError as error:
         st.error(f"Impossibile costruire le tre linee ordinate: {error}")
@@ -529,7 +544,7 @@ if uploaded:
     ).set_index("Benchmark")
     risk_df = pd.DataFrame(historical_risk).T
     concentration_df = pd.DataFrame(concentration_metrics).T
-    bootstrap_intervals, _ = bootstrap_portfolio_intervals(
+    bootstrap_intervals, bootstrap_raw = bootstrap_portfolio_intervals(
         allocations,
         returns,
         freq,
@@ -564,7 +579,8 @@ if uploaded:
             mean_shrinkage,
             transaction_cost_bps,
             ordered_strategy_names=tuple(name for name, _ in strategies_config),
-            line_gap=VOLATILITY_LINE_GAP,
+            line_gap=line_gap,
+            test_start_fraction=0.50,
         )
     except ValueError as error:
         walk_error = str(error)
@@ -650,7 +666,7 @@ if uploaded:
         st.markdown("#### Corridoi di volatilità attivi")
         st.caption(
             "Il minimo di Balanced è la volatilità calcolata di Conservative "
-            "più 0,1 punti percentuali; quello di Aggressive deriva allo "
+            f"più {line_gap_pp:.1f} punti percentuali; quello di Aggressive deriva allo "
             "stesso modo da Balanced. Se un corridoio non è fattibile, il "
             "calcolo si interrompe senza allentare i vincoli."
         )
@@ -708,6 +724,76 @@ if uploaded:
             .format("{:.2f}", subset=["Sortino"]),
             width="stretch",
         )
+
+        st.markdown("#### Separazione effettiva dei profili")
+        bootstrap_volatility = bootstrap_raw.pivot(
+            index="Simulazione", columns="Linea", values="Volatilità"
+        )
+        profile_rows = []
+        for previous, following in [
+            ("Conservative", "Balanced"),
+            ("Balanced", "Aggressive"),
+        ]:
+            sampled_gap = (
+                bootstrap_volatility[following]
+                - bootstrap_volatility[previous]
+            )
+            profile_rows.append(
+                {
+                    "Confronto": f"{following} vs {previous}",
+                    "Scarto volatilità prevista": (
+                        res_df.loc[following, "Volatilità"]
+                        - res_df.loc[previous, "Volatilità"]
+                    ),
+                    "Scarto CVaR storico": (
+                        risk_df.loc[following, "CVaR 95% (periodo)"]
+                        - risk_df.loc[previous, "CVaR 95% (periodo)"]
+                    ),
+                    "Scarto Max Drawdown": (
+                        risk_df.loc[previous, "Max Drawdown"]
+                        - risk_df.loc[following, "Max Drawdown"]
+                    ),
+                    "Distanza pesi": (
+                        0.5
+                        * np.abs(allocations[following] - allocations[previous]).sum()
+                    ),
+                    "Ricampionamenti con ordine vol.": (sampled_gap > 0).mean(),
+                    "Scarto vol. 5% bootstrap": sampled_gap.quantile(0.05),
+                }
+            )
+        profile_separation = pd.DataFrame(profile_rows).set_index("Confronto")
+        copyable_table(
+            profile_separation.style.format("{:.2%}"),
+            width="stretch",
+        )
+        st.caption(
+            "Scarti positivi di CVaR e Max Drawdown indicano maggior rischio "
+            "nella linea successiva. Distanza pesi = metà della somma delle "
+            "differenze assolute. Il bootstrap ricampiona le stesse serie con "
+            "pesi fissi: descrive la stabilità nel campione, non garantisce "
+            "l'ordine del rischio futuro."
+        )
+        weak_pairs = profile_separation.index[
+            (profile_separation["Scarto CVaR storico"] <= 0)
+            | (profile_separation["Scarto Max Drawdown"] <= 0)
+            | (profile_separation["Scarto vol. 5% bootstrap"] <= 0)
+        ].tolist()
+        if weak_pairs:
+            st.warning(
+                "I profili non risultano chiaramente separati su tutte le "
+                "misure di rischio per: " + ", ".join(weak_pairs)
+                + ". Aumentare lo scarto di volatilità può aiutare, ma può "
+                "rendere i vincoli non fattibili."
+            )
+        if (
+            res_df.loc["Aggressive", "Rendimento"]
+            <= res_df.loc["Balanced", "Rendimento"]
+        ):
+            st.warning(
+                "Aggressive ha più volatilità prevista ma rendimento atteso "
+                "non superiore a Balanced: sulla coppia rendimento-volatilità "
+                "è dominata. Le stime di rendimento restano incerte."
+            )
 
         st.markdown("#### Intervalli d'incertezza bootstrap")
         st.caption(
@@ -891,6 +977,36 @@ if uploaded:
             "a ogni ribilanciamento. La volatilità realizzata può non mantenere "
             "l'ordine delle linee. Anche i benchmark non hanno un corridoio "
             "di linea."
+        )
+
+        st.markdown("#### Finestre cronologiche fuori campione")
+        validation_windows = summarize_validation_windows(
+            nav_df, freq, risk_free_rate
+        )
+        window_count = validation_windows["Finestra"].nunique()
+        st.caption(
+            f"{window_count} finestre consecutive senza sovrapposizione, "
+            "con pesi ricalcolati usando solo le osservazioni precedenti e "
+            "risultati netti dei costi. Il test inizia dopo almeno il 50% "
+            "dello storico e almeno 12 osservazioni o 2 per titolo. "
+            "Le finestre condividono il metodo e l'addestramento progressivo."
+        )
+        if window_count < 3:
+            st.warning(
+                "Storico fuori campione insufficiente per tre finestre con "
+                "almeno cinque osservazioni ciascuna."
+            )
+        copyable_table(
+            validation_windows.set_index(["Finestra", "Linea"]).style
+            .format(
+                "{:.2%}",
+                subset=[
+                    "Rendimento annuo", "Volatilità",
+                    "CVaR 95% (periodo)", "Max Drawdown",
+                ],
+            )
+            .format("{:.2f}", subset=["Sharpe"]),
+            width="stretch",
         )
 
         cost_comparison = pd.DataFrame(

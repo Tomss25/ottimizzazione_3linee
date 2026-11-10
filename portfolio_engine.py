@@ -1041,6 +1041,7 @@ def run_walk_forward(
     transaction_cost_bps,
     ordered_strategy_names=(),
     line_gap=VOLATILITY_LINE_GAP,
+    test_start_fraction=0.70,
 ):
     ordered_strategy_names = tuple(ordered_strategy_names)
     ordered_config = [
@@ -1052,7 +1053,9 @@ def run_walk_forward(
 
     observation_count, asset_count = returns_simple.shape
     minimum_training = max(12, 2 * asset_count)
-    test_start = max(minimum_training, int(observation_count * 0.70))
+    if not 0 < test_start_fraction < 1:
+        raise ValueError("La quota iniziale di addestramento deve essere tra 0 e 1.")
+    test_start = max(minimum_training, int(observation_count * test_start_fraction))
     if observation_count - test_start < 5:
         raise ValueError(
             "Storico insufficiente per una validazione fuori campione."
@@ -1246,3 +1249,39 @@ def run_walk_forward(
         )
     summary = pd.DataFrame(summary_rows).set_index("Linea")
     return nav, test_start, summary, gross_nav, diagnostics
+
+
+def summarize_validation_windows(nav, frequency, risk_free_rate, desired_windows=3):
+    """Summarize non-overlapping chronological slices of net OOS returns."""
+    period_returns = nav.pct_change(fill_method=None).iloc[1:]
+    observation_count = len(period_returns)
+    if observation_count < 5:
+        raise ValueError("Servono almeno 5 periodi fuori campione.")
+    window_count = min(desired_windows, max(1, observation_count // 5))
+    windows = np.array_split(np.arange(observation_count), window_count)
+    rows = []
+    for window_number, positions in enumerate(windows, start=1):
+        block = period_returns.iloc[positions]
+        for name in block.columns:
+            values = block[name].to_numpy(dtype=float)
+            volatility = float(np.std(values, ddof=1) * np.sqrt(frequency))
+            annual_return = float(np.mean(values) * frequency)
+            sharpe = (
+                (annual_return - risk_free_rate) / volatility
+                if volatility > 1e-12 else np.nan
+            )
+            path = np.r_[1.0, np.cumprod(1 + values)]
+            max_drawdown = float(np.min(path / np.maximum.accumulate(path) - 1))
+            rows.append({
+                "Finestra": window_number,
+                "Dal": block.index[0].date(),
+                "Al": block.index[-1].date(),
+                "Linea": name,
+                "Rendimento annuo": annual_return,
+                "Volatilità": volatility,
+                "Sharpe": sharpe,
+                "CVaR 95% (periodo)": empirical_cvar(values),
+                "Max Drawdown": max_drawdown,
+                "Osservazioni": len(values),
+            })
+    return pd.DataFrame(rows)

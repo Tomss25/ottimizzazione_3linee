@@ -13,6 +13,7 @@ from portfolio_engine import (
     optimize_ordered_lines,
     process_data_raw,
     run_walk_forward,
+    summarize_validation_windows,
 )
 
 
@@ -274,6 +275,35 @@ class PortfolioEngineTests(unittest.TestCase):
             set(diagnostics["Linea"])
             >= {"GMV Ledoit-Wolf", "HRP vincolato", "Equal Weight"}
         )
+
+    def test_validation_windows_are_chronological_and_non_overlapping(self):
+        dates = pd.bdate_range("2024-01-01", periods=31)
+        returns = np.r_[np.full(10, 0.01), np.full(10, -0.01), np.full(10, 0.02)]
+        nav = pd.DataFrame(
+            {"Conservative": 100 * np.r_[1.0, np.cumprod(1 + returns)]},
+            index=dates,
+        )
+        windows = summarize_validation_windows(nav, 252, 0.02)
+        self.assertEqual(len(windows), 3)
+        self.assertEqual(windows["Osservazioni"].tolist(), [10, 10, 10])
+        self.assertTrue((windows["Dal"].iloc[1:].to_numpy() > windows["Al"].iloc[:-1].to_numpy()).all())
+        self.assertLess(windows.loc[1, "Rendimento annuo"], 0)
+
+    def test_walk_forward_rejects_invalid_training_fraction(self):
+        with self.assertRaisesRegex(ValueError, "quota iniziale"):
+            run_walk_forward(
+                self.returns,
+                [("Conservative", "min_cvar")],
+                np.zeros(4),
+                np.full(4, 0.70),
+                0.02,
+                {"Conservative": 0.20},
+                {"Conservative": 0.0},
+                252,
+                0.70,
+                10,
+                test_start_fraction=1.0,
+            )
 
 
 if __name__ == "__main__":
